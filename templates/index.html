@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Dance Trainer</title>
+<style>
+/* ── Reset & Base ───────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1a1a2e; color: #e0e0e0;
+  overflow-x: hidden;
+}
+
+/* ── Top Bar ────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: #16213e; border-bottom: 1px solid #0f3460;
+}
+.topbar h1 { font-size: 18px; font-weight: 600; color: #e94560; }
+.topbar .modes { display: flex; gap: 8px; }
+.topbar .hint { font-size: 12px; color: #888; }
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+.btn {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #16213e; color: #e0e0e0; cursor: pointer;
+  font-size: 13px; transition: all .15s;
+}
+.btn:hover { background: #0f3460; }
+.btn.active { background: #e94560; border-color: #e94560; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* ── Video Container ────────────────────────────────────────────── */
+.container { display: flex; height: calc(100vh - 52px); }
+
+/* Side-by-side mode */
+.side-panel {
+  flex: 1; display: flex; flex-direction: column;
+  border-right: 2px solid #0f3460; min-width: 0;
+}
+.side-panel:last-child { border-right: none; }
+.side-panel .label {
+  padding: 6px 12px; font-size: 13px; font-weight: 600;
+  background: #16213e; color: #e94560; text-align: center;
+}
+
+.video-wrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: #111; overflow: hidden; position: relative;
+}
+.video-wrap video {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+}
+.video-wrap .placeholder {
+  color: #555; font-size: 14px; text-align: center; padding: 20px;
+}
+
+/* ── Controls Panel ─────────────────────────────────────────────── */
+.controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px; background: #16213e; border-top: 1px solid #0f3460;
+  min-height: 44px;
+}
+.controls .group {
+  display: flex; align-items: center; gap: 4px;
+}
+.controls label { font-size: 11px; color: #999; white-space: nowrap; }
+.controls select, .controls input[type="range"] {
+  background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460;
+  border-radius: 4px; font-size: 12px; padding: 2px 4px;
+}
+.controls input[type="range"] { width: 80px; }
+.controls input[type="file"] { display: none; }
+
+/* progress bar */
+.progress-bar {
+  width: 100%; height: 6px; background: #333; border-radius: 3px;
+  cursor: pointer; position: relative;
+}
+.progress-bar .fill {
+  height: 100%; background: #e94560; border-radius: 3px;
+  pointer-events: none; transition: width 0.1s linear;
+}
+
+/* ── Fusion Mode ────────────────────────────────────────────────── */
+.fusion-container {
+  position: relative; width: 100%; height: calc(100vh - 52px);
+  background: #111; overflow: hidden; display: none;
+}
+.fusion-video {
+  position: absolute; cursor: grab;
+  transform-origin: center center;
+}
+.fusion-video:active { cursor: grabbing; }
+.fusion-video video {
+  width: 100%; height: 100%; object-fit: contain;
+  pointer-events: none;
+}
+.fusion-video .tag {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(233,69,96,0.8); color: #fff;
+  padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  pointer-events: none;
+}
+
+/* Fusion controls overlay */
+.fusion-controls {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(22,33,62,0.92); padding: 10px 16px;
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  border-top: 1px solid #0f3460; z-index: 100;
+}
+.fusion-controls .section {
+  display: flex; align-items: center; gap: 6px;
+  border-right: 1px solid #333; padding-right: 12px;
+}
+.fusion-controls .section:last-child { border-right: none; }
+
+/* Webcam choose overlay */
+.source-choose {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: #888;
+}
+</style>
+</head>
+<body>
+
+<!-- ── Top Bar ─────────────────────────────────────────────────── -->
+<div class="topbar">
+  <h1>Dance Trainer</h1>
+  <div class="modes">
+    <button class="btn active" id="btnSide" onclick="setMode('side')">并排模式</button>
+    <button class="btn" id="btnFusion" onclick="setMode('fusion')">融合模式</button>
+  </div>
+  <div class="hint">Space = 同步播放/暂停 &nbsp;|&nbsp; 融合模式: 拖拽移动, 滚轮缩放</div>
+</div>
+
+<!-- ── Side-by-side Mode ──────────────────────────────────────── -->
+<div class="container" id="sideContainer">
+
+  <!-- Left: Coach -->
+  <div class="side-panel">
+    <div class="label">教练视频</div>
+    <div class="video-wrap" id="coachWrap">
+      <video id="coachVideo" loop muted playsinline></video>
+      <div class="placeholder" id="coachPlaceholder">
+        点击下方「选择文件」上传教练视频
+      </div>
+    </div>
+    <div class="progress-bar" id="coachProgress" onclick="seekVideo(event,'coach')">
+      <div class="fill" id="coachFill"></div>
+    </div>
+    <div class="controls">
+      <div class="group">
+        <button class="btn btn-sm" onclick="togglePlay('coach')">⏯</button>
+        <label>
+          <input type="file" accept="video/*" onchange="loadFile(this,'coach')">
+          <span class="btn btn-sm">选择文件</span>
+        </label>
+      </div>
+      <div class="group">
+        <label>速度</label>
+        <select onchange="setSpeed('coach', this.value)">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm" id="coachMirrorBtn" onclick="toggleMirror('coach')">镜像</button>
+      </div>
+      <div class="group">
+        <label id="coachTime">0:00 / 0:00</label>
+      </div>
+    </div>
+  </div>
+
+  <!-- Right: User -->
+  <div class="side-panel">
+    <div class="label">
+      用户视频
+      <button class="btn btn-sm" id="srcWebcam" onclick="setUserSource('webcam')" style="margin-left:8px;">Webcam</button>
+      <button class="btn btn-sm" id="srcFile" onclick="setUserSource('file')">上传视频</button>
+    </div>
+    <div class="video-wrap" id="userWrap">
+      <video id="userVideo" loop muted playsinline></video>
+      <div class="placeholder" id="userPlaceholder">
+        选择「Webcam」或「上传视频」
+      </div>
+    </div>
+    <div class="progress-bar" id="userProgress" onclick="seekVideo(event,'user')">
+      <div class="fill" id="userFill"></div>
+    </div>
+    <div class="controls">
+      <div class="group">
+        <button class="btn btn-sm" onclick="togglePlay('user')">⏯</button>
+        <label id="userFileLabel" style="display:none;">
+          <input type="file" accept="video/*" onchange="loadFile(this,'user')">
+          <span class="btn btn-sm">选择文件</span>
+        </label>
+      </div>
+      <div class="group">
+        <label>速度</label>
+        <select onchange="setSpeed('user', this.value)">
+          <option value="0.25">0.25x</option>
+          <option value="0.5">0.5x</option>
+          <option value="0.75">0.75x</option>
+          <option value="1" selected>1x</option>
+          <option value="1.5">1.5x</option>
+          <option value="2">2x</option>
+        </select>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm" id="userMirrorBtn" onclick="toggleMirror('user')">镜像</button>
+      </div>
+      <div class="group">
+        <label id="userTime">0:00 / 0:00</label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Fusion Mode ────────────────────────────────────────────── -->
+<div class="fusion-container" id="fusionContainer">
+  <div class="fusion-video" id="fusionCoach" style="width:50%; left:25%; top:5%;">
+    <div class="tag">教练</div>
+    <video id="fusionCoachVideo" loop muted playsinline></video>
+  </div>
+  <div class="fusion-video" id="fusionUser" style="width:50%; left:25%; top:5%;">
+    <div class="tag">用户</div>
+    <video id="fusionUserVideo" loop muted playsinline></video>
+  </div>
+
+  <div class="fusion-controls">
+    <!-- Coach controls -->
+    <div class="section">
+      <label style="color:#e94560;font-weight:600;">教练</label>
+      <button class="btn btn-sm" onclick="togglePlay('coach')">⏯</button>
+      <label>速度</label>
+      <select onchange="setSpeed('coach', this.value)" id="fusionCoachSpeed">
+        <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option>
+      </select>
+      <button class="btn btn-sm" onclick="toggleMirror('coach')">镜像</button>
+      <label>透明度</label>
+      <input type="range" min="0" max="100" value="100" oninput="setOpacity('coach', this.value)">
+    </div>
+    <!-- User controls -->
+    <div class="section">
+      <label style="color:#e94560;font-weight:600;">用户</label>
+      <button class="btn btn-sm" onclick="togglePlay('user')">⏯</button>
+      <label>速度</label>
+      <select onchange="setSpeed('user', this.value)" id="fusionUserSpeed">
+        <option value="0.25">0.25x</option><option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option>
+      </select>
+      <button class="btn btn-sm" onclick="toggleMirror('user')">镜像</button>
+      <label>透明度</label>
+      <input type="range" min="0" max="100" value="60" oninput="setOpacity('user', this.value)">
+    </div>
+    <!-- Global -->
+    <div class="section">
+      <button class="btn btn-sm" onclick="syncPlayPause()">同步 ⏯ (Space)</button>
+      <button class="btn btn-sm" onclick="syncRestart()">同步重置</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ================================================================
+   State
+   ================================================================ */
+const state = {
+  mode: 'side',       // 'side' | 'fusion'
+  mirror: { coach: false, user: false },
+  userSource: null,    // 'webcam' | 'file'
+  webcamStream: null,
+};
+
+/* Video element references — always return the ACTIVE video for current mode */
+function vid(role) {
+  if (state.mode === 'side') {
+    return role === 'coach' ? document.getElementById('coachVideo')
+                            : document.getElementById('userVideo');
+  }
+  return role === 'coach' ? document.getElementById('fusionCoachVideo')
+                          : document.getElementById('fusionUserVideo');
+}
+
+/* All video elements for a role (both modes share the same source) */
+function allVids(role) {
+  return role === 'coach'
+    ? [document.getElementById('coachVideo'), document.getElementById('fusionCoachVideo')]
+    : [document.getElementById('userVideo'), document.getElementById('fusionUserVideo')];
+}
+
+/* ================================================================
+   Mode Switching
+   ================================================================ */
+function setMode(m) {
+  state.mode = m;
+  document.getElementById('sideContainer').style.display  = m === 'side' ? 'flex' : 'none';
+  document.getElementById('fusionContainer').style.display = m === 'fusion' ? 'block' : 'none';
+  document.getElementById('btnSide').classList.toggle('active', m === 'side');
+  document.getElementById('btnFusion').classList.toggle('active', m === 'fusion');
+
+  // Sync video sources to fusion videos when entering fusion mode
+  if (m === 'fusion') {
+    syncSourceToFusion('coach');
+    syncSourceToFusion('user');
+  }
+}
+
+function syncSourceToFusion(role) {
+  const sideV = role === 'coach' ? document.getElementById('coachVideo')
+                                 : document.getElementById('userVideo');
+  const fusV  = role === 'coach' ? document.getElementById('fusionCoachVideo')
+                                 : document.getElementById('fusionUserVideo');
+
+  if (role === 'user' && state.userSource === 'webcam' && state.webcamStream) {
+    fusV.srcObject = state.webcamStream;
+    fusV.play().catch(() => {});
+  } else if (sideV.src && sideV.src !== location.href) {
+    fusV.src = sideV.src;
+    fusV.currentTime = sideV.currentTime;
+    fusV.playbackRate = sideV.playbackRate;
+    if (!sideV.paused) fusV.play().catch(() => {});
+  }
+  // Sync mirror
+  const mirrored = state.mirror[role];
+  fusV.style.transform = mirrored ? 'scaleX(-1)' : '';
+}
+
+/* ================================================================
+   File Upload / Source Selection
+   ================================================================ */
+function loadFile(input, role) {
+  const file = input.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  allVids(role).forEach(v => {
+    v.src = url;
+    v.load();
+  });
+  // Hide placeholder
+  const ph = role === 'coach' ? document.getElementById('coachPlaceholder')
+                               : document.getElementById('userPlaceholder');
+  ph.style.display = 'none';
+}
+
+function setUserSource(src) {
+  state.userSource = src;
+  document.getElementById('srcWebcam').classList.toggle('active', src === 'webcam');
+  document.getElementById('srcFile').classList.toggle('active', src === 'file');
+  document.getElementById('userFileLabel').style.display = src === 'file' ? '' : 'none';
+
+  if (src === 'webcam') {
+    startWebcam();
+  } else {
+    stopWebcam();
+  }
+}
+
+async function startWebcam() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+    });
+    state.webcamStream = stream;
+    allVids('user').forEach(v => {
+      v.srcObject = stream;
+      v.play().catch(() => {});
+    });
+    document.getElementById('userPlaceholder').style.display = 'none';
+  } catch (e) {
+    alert('无法访问摄像头：' + e.message);
+  }
+}
+
+function stopWebcam() {
+  if (state.webcamStream) {
+    state.webcamStream.getTracks().forEach(t => t.stop());
+    state.webcamStream = null;
+  }
+  allVids('user').forEach(v => { v.srcObject = null; });
+}
+
+/* ================================================================
+   Playback Controls
+   ================================================================ */
+function togglePlay(role) {
+  const v = vid(role);
+  if (!v.src && !v.srcObject) return;
+  if (v.paused) v.play().catch(() => {});
+  else v.pause();
+}
+
+function setSpeed(role, val) {
+  const s = parseFloat(val);
+  allVids(role).forEach(v => { v.playbackRate = s; });
+}
+
+function toggleMirror(role) {
+  state.mirror[role] = !state.mirror[role];
+  const mirrored = state.mirror[role];
+  allVids(role).forEach(v => {
+    v.style.transform = mirrored ? 'scaleX(-1)' : '';
+  });
+  const btn = document.getElementById(role + 'MirrorBtn');
+  if (btn) btn.classList.toggle('active', mirrored);
+}
+
+function setOpacity(role, val) {
+  const el = role === 'coach' ? document.getElementById('fusionCoach')
+                               : document.getElementById('fusionUser');
+  el.style.opacity = val / 100;
+}
+
+function syncPlayPause() {
+  const cv = vid('coach'), uv = vid('user');
+  const anySrc = (cv.src && cv.src !== location.href) || cv.srcObject
+              || (uv.src && uv.src !== location.href) || uv.srcObject;
+  if (!anySrc) return;
+  if (cv.paused || uv.paused) {
+    cv.play().catch(() => {});
+    uv.play().catch(() => {});
+  } else {
+    cv.pause();
+    uv.pause();
+  }
+}
+
+function syncRestart() {
+  allVids('coach').forEach(v => { v.currentTime = 0; });
+  allVids('user').forEach(v => {
+    if (!v.srcObject) v.currentTime = 0;
+  });
+}
+
+function seekVideo(event, role) {
+  const bar = event.currentTarget;
+  const pct = event.offsetX / bar.offsetWidth;
+  const v = vid(role);
+  if (v.duration) v.currentTime = pct * v.duration;
+}
+
+/* ================================================================
+   Progress Bar & Time Display Update
+   ================================================================ */
+function fmtTime(s) {
+  if (!s || isNaN(s)) return '0:00';
+  const m = Math.floor(s / 60);
+  const sec = Math.floor(s % 60);
+  return m + ':' + String(sec).padStart(2, '0');
+}
+
+function updateProgress() {
+  ['coach', 'user'].forEach(role => {
+    const v = (state.mode === 'side')
+      ? document.getElementById(role + 'Video')
+      : document.getElementById('fusion' + (role === 'coach' ? 'Coach' : 'User') + 'Video');
+    const fill = document.getElementById(role + 'Fill');
+    const time = document.getElementById(role + 'Time');
+    if (v && v.duration) {
+      const pct = (v.currentTime / v.duration) * 100;
+      if (fill) fill.style.width = pct + '%';
+      if (time) time.textContent = fmtTime(v.currentTime) + ' / ' + fmtTime(v.duration);
+    }
+  });
+  requestAnimationFrame(updateProgress);
+}
+requestAnimationFrame(updateProgress);
+
+/* ================================================================
+   Keyboard Shortcuts
+   ================================================================ */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    syncPlayPause();
+  }
+});
+
+/* ================================================================
+   Fusion Mode: Drag & Zoom
+   ================================================================ */
+(function initFusionDrag() {
+  const els = ['fusionCoach', 'fusionUser'];
+  els.forEach(id => {
+    const el = document.getElementById(id);
+    let dragging = false, startX, startY, origLeft, origTop;
+
+    el.addEventListener('mousedown', e => {
+      dragging = true;
+      startX = e.clientX; startY = e.clientY;
+      origLeft = el.offsetLeft; origTop = el.offsetTop;
+      e.preventDefault();
+    });
+
+    document.addEventListener('mousemove', e => {
+      if (!dragging) return;
+      el.style.left = (origLeft + e.clientX - startX) + 'px';
+      el.style.top  = (origTop  + e.clientY - startY) + 'px';
+    });
+
+    document.addEventListener('mouseup', () => { dragging = false; });
+
+    // Scroll to resize
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      let w = el.offsetWidth;
+      const delta = e.deltaY > 0 ? -40 : 40;
+      w = Math.max(160, Math.min(window.innerWidth, w + delta));
+      el.style.width = w + 'px';
+    }, { passive: false });
+  });
+})();
+</script>
+</body>
+</html>
