@@ -4,10 +4,52 @@ import cv2
 import numpy as np
 import tempfile
 
+from pose_utils import cosine_similarity_error
+
 # Initialize MediaPipe pose detection
 mp_pose = mp.solutions.pose
 mp_drawing = mp.solutions.drawing_utils
 pose = mp_pose.Pose(static_image_mode=False)
+
+# Initialize MediaPipe selfie segmentation
+mp_selfie_seg = mp.solutions.selfie_segmentation
+segmenter = mp_selfie_seg.SelfieSegmentation(model_selection=1)
+
+
+def apply_person_segmentation(frame_rgb, pose_landmarks, bg_color=(255, 255, 255)):
+    """
+    用 selfie_segmentation 分割人物，背景替换为 bg_color。
+    如果有 pose_landmarks，则用关键点 bounding box 限定区域，
+    确保只保留被 Pose 检测到的那一个人。
+    """
+    seg_result = segmenter.process(frame_rgb)
+    mask = seg_result.segmentation_mask  # float32, 0~1
+
+    h, w = frame_rgb.shape[:2]
+
+    # 如果有 pose landmarks，用 bounding box 限制 mask 范围
+    if pose_landmarks:
+        xs = [lm.x for lm in pose_landmarks.landmark]
+        ys = [lm.y for lm in pose_landmarks.landmark]
+        pad = 0.08  # 边缘留一点余量
+        x_min = max(0, int((min(xs) - pad) * w))
+        x_max = min(w, int((max(xs) + pad) * w))
+        y_min = max(0, int((min(ys) - pad) * h))
+        y_max = min(h, int((max(ys) + pad) * h))
+
+        # 在 bounding box 外部将 mask 置 0
+        region_mask = np.zeros((h, w), dtype=np.float32)
+        region_mask[y_min:y_max, x_min:x_max] = 1.0
+        mask = mask * region_mask
+
+    # 二值化 mask（阈值 0.5）并做轻微模糊使边缘平滑
+    mask_bin = (mask > 0.5).astype(np.uint8)
+    mask_blur = cv2.GaussianBlur(mask_bin.astype(np.float32), (7, 7), 0)
+
+    bg = np.full_like(frame_rgb, bg_color, dtype=np.uint8)
+    alpha = mask_blur[:, :, np.newaxis]
+    result = (frame_rgb * alpha + bg * (1 - alpha)).astype(np.uint8)
+    return result
 
 # Streamlit layout
 st.title("AI Dance Trainer")
@@ -16,6 +58,14 @@ with st.sidebar:
     st.header("Video Upload")
     benchmark_video_file = st.file_uploader("Upload a benchmark video", type=["mp4", "mov", "avi", "mkv"], key="benchmark")
     uploaded_video = st.file_uploader("Upload your video", type=["mp4", "mov", "avi", "mkv"], key="user_video")
+
+    st.header("Person Segmentation")
+    seg_benchmark = st.checkbox("基准视频人物分割", value=False)
+    seg_user = st.checkbox("用户视频人物分割", value=False)
+    bg_color = (255, 255, 255)
+    if seg_benchmark or seg_user:
+        bg_choice = st.radio("背景颜色", ["白色", "黑色"], horizontal=True)
+        bg_color = (255, 255, 255) if bg_choice == "白色" else (0, 0, 0)
 
 if 'playing' not in st.session_state:
     st.session_state.playing = False
@@ -34,17 +84,6 @@ def save_uploaded_file(uploaded_file):
             tmp_file.write(uploaded_file.getvalue())
             return tmp_file.name
     return None
-
-def cosine_distance(landmarks1, landmarks2):
-    if landmarks1 and landmarks2:
-        points1 = np.array([(lm.x, lm.y, lm.z) for lm in landmarks1.landmark])
-        points2 = np.array([(lm.x, lm.y, lm.z) for lm in landmarks2.landmark])
-        dot_product = np.dot(points1.flatten(), points2.flatten())
-        norm_product = np.linalg.norm(points1.flatten()) * np.linalg.norm(points2.flatten())
-        similarity = dot_product / norm_product
-        return 1 - similarity
-    else:
-        return 1
 
 if st.session_state.playing and benchmark_video_file and uploaded_video:
     temp_file_path_benchmark = save_uploaded_file(benchmark_video_file)
@@ -84,13 +123,29 @@ if st.session_state.playing and benchmark_video_file and uploaded_video:
             results_user = pose.process(image_user)
             results_benchmark = pose.process(image_benchmark)
 
+            # Apply person segmentation if enabled
+            if seg_benchmark:
+                image_benchmark = apply_person_segmentation(
+                    image_benchmark,
+                    results_benchmark.pose_landmarks,
+                    bg_color
+                )
+            if seg_user:
+                image_user = apply_person_segmentation(
+                    image_user,
+                    results_user.pose_landmarks,
+                    bg_color
+                )
+
             if results_user.pose_landmarks:
                 mp_drawing.draw_landmarks(image_user, results_user.pose_landmarks, mp_pose.POSE_CONNECTIONS)
 
             benchmark_video_placeholder.image(image_benchmark, channels="RGB", use_column_width=True)
             user_video_placeholder.image(image_user, channels="BGR", use_column_width=True)
 
-            error = cosine_distance(results_user.pose_landmarks, results_benchmark.pose_landmarks) * 100
+            error = cosine_similarity_error(results_user.pose_landmarks, results_benchmark.pose_landmarks)
+            if error is None:
+                error = 100
             correct_step = error < 30
             correct_steps += correct_step
 

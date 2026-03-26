@@ -1,0 +1,224 @@
+/* ── Reset & Base ───────────────────────────────────────────────── */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: #1a1a2e; color: #e0e0e0;
+  overflow-x: hidden;
+}
+
+/* ── Top Bar ────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 20px; background: #16213e; border-bottom: 1px solid #0f3460;
+}
+.topbar h1 { font-size: 18px; font-weight: 600; color: #e94560; }
+.topbar .modes { display: flex; gap: 8px; }
+.topbar .hint { font-size: 12px; color: #888; }
+
+/* ── Buttons ────────────────────────────────────────────────────── */
+.btn {
+  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
+  background: #16213e; color: #e0e0e0; cursor: pointer;
+  font-size: 13px; transition: all .15s;
+}
+.btn:hover { background: #0f3460; }
+.btn.active { background: #e94560; border-color: #e94560; color: #fff; }
+.btn-sm { padding: 4px 10px; font-size: 12px; }
+
+/* ── Video Container ────────────────────────────────────────────── */
+.container { display: flex; height: calc(100vh - 52px); }
+
+/* Side-by-side mode */
+.side-panel {
+  flex: 1; display: flex; flex-direction: column;
+  border-right: 2px solid #0f3460; min-width: 0;
+}
+.side-panel:last-child { border-right: none; }
+.side-panel .label {
+  padding: 6px 12px; font-size: 13px; font-weight: 600;
+  background: #16213e; color: #e94560; text-align: center;
+}
+
+.video-wrap {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  background: #111; overflow: hidden; position: relative;
+}
+.video-wrap video {
+  max-width: 100%; max-height: 100%; object-fit: contain;
+}
+.video-wrap .placeholder {
+  color: #555; font-size: 14px; text-align: center; padding: 20px;
+}
+
+/* ── Controls Panel ─────────────────────────────────────────────── */
+.controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  padding: 8px 12px; background: #16213e; border-top: 1px solid #0f3460;
+  min-height: 44px;
+}
+.controls .group {
+  display: flex; align-items: center; gap: 4px;
+}
+.controls label { font-size: 11px; color: #999; white-space: nowrap; }
+.controls select, .controls input[type="range"] {
+  background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460;
+  border-radius: 4px; font-size: 12px; padding: 2px 4px;
+}
+.controls input[type="range"] { width: 80px; }
+.controls input[type="file"] { display: none; }
+
+/* progress bar */
+.progress-bar {
+  width: 100%; height: 6px; background: #333; border-radius: 3px;
+  cursor: pointer; position: relative;
+}
+.progress-bar .fill {
+  height: 100%; background: #e94560; border-radius: 3px;
+  pointer-events: none; transition: none;
+}
+.progress-bar .thumb {
+  position: absolute; top: 50%; width: 14px; height: 14px;
+  background: #e94560; border: 2px solid #fff; border-radius: 50%;
+  transform: translate(-50%, -50%); pointer-events: none;
+  box-shadow: 0 0 4px rgba(0,0,0,0.5);
+}
+
+/* ── Fusion Mode ────────────────────────────────────────────────── */
+.fusion-container {
+  position: relative; width: 100%; height: calc(100vh - 52px);
+  background: #111; overflow: hidden; display: none;
+}
+.fusion-video {
+  position: absolute; cursor: grab;
+  transform-origin: center center;
+}
+.fusion-video:active { cursor: grabbing; }
+.fusion-video video {
+  width: 100%; height: 100%; object-fit: contain;
+  pointer-events: none;
+}
+.fusion-video .tag {
+  position: absolute; top: 4px; left: 4px;
+  background: rgba(233,69,96,0.8); color: #fff;
+  padding: 2px 8px; border-radius: 4px; font-size: 11px;
+  pointer-events: none;
+}
+.fusion-video .resize-handle {
+  position: absolute; right: 0; bottom: 0; width: 20px; height: 20px;
+  cursor: nwse-resize; z-index: 10;
+  background: linear-gradient(135deg, transparent 50%, rgba(233,69,96,0.7) 50%);
+  border-radius: 0 0 4px 0;
+}
+
+/* Fusion controls overlay */
+.fusion-controls {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: rgba(22,33,62,0.92); padding: 10px 16px;
+  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+  border-top: 1px solid #0f3460; z-index: 100;
+}
+.fusion-controls .section {
+  display: flex; align-items: center; gap: 6px;
+  border-right: 1px solid #333; padding-right: 12px;
+}
+.fusion-controls .section:last-child { border-right: none; }
+
+/* Webcam choose overlay */
+.source-choose {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  color: #888;
+}
+
+/* ── Trim Controls ─────────────────────────────────────────────── */
+.trim-bar {
+  width: 100%; padding: 4px 12px; background: #121a30;
+  border-top: 1px solid #0f3460;
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.trim-bar label { font-size: 11px; color: #999; white-space: nowrap; }
+.trim-bar .trim-val { font-size: 11px; color: #e94560; font-variant-numeric: tabular-nums; min-width: 56px; }
+.trim-range-wrap {
+  flex: 1; position: relative; height: 20px; min-width: 120px;
+}
+.trim-range-wrap .trim-track {
+  position: absolute; top: 8px; left: 0; right: 0; height: 4px;
+  background: #333; border-radius: 2px;
+}
+.trim-range-wrap .trim-highlight {
+  position: absolute; top: 8px; height: 4px;
+  background: #e94560; border-radius: 2px;
+}
+.trim-range-wrap input[type="range"] {
+  position: absolute; top: 0; width: 100%; height: 20px;
+  -webkit-appearance: none; appearance: none;
+  background: transparent; pointer-events: none; margin: 0;
+}
+.trim-range-wrap input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #e94560; border: 2px solid #fff;
+  cursor: pointer; pointer-events: auto;
+  box-shadow: 0 0 3px rgba(0,0,0,0.5);
+}
+
+/* ── Segmentation ───────────────────────────────────────────────── */
+.btn-seg { background: #1a3a2e; border-color: #2a6a4e; color: #4ade80; }
+.btn-seg:hover { background: #2a5a3e; }
+.btn-seg.segmented { background: #166534; border-color: #4ade80; color: #4ade80; }
+
+/* Full-screen loading overlay */
+.seg-overlay {
+  display: none; position: fixed; inset: 0; z-index: 9999;
+  background: rgba(10,10,20,0.88); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center; flex-direction: column;
+  gap: 20px;
+}
+.seg-overlay.active { display: flex; }
+.seg-overlay .seg-box {
+  background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+  padding: 32px 40px; min-width: 360px; text-align: center;
+}
+.seg-overlay h2 { font-size: 18px; color: #e0e0e0; margin-bottom: 8px; }
+.seg-overlay .seg-sub { font-size: 13px; color: #888; margin-bottom: 24px; }
+.seg-overlay .seg-progress-track {
+  width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden;
+  margin-bottom: 10px;
+}
+.seg-overlay .seg-progress-fill {
+  height: 100%; background: linear-gradient(90deg, #e94560, #ff6b6b);
+  border-radius: 4px; transition: width .3s ease; width: 0%;
+}
+.seg-overlay .seg-pct { font-size: 28px; font-weight: 700; color: #e94560; }
+.seg-overlay .seg-eta { font-size: 12px; color: #888; margin-top: 4px; }
+.seg-overlay .seg-cancel {
+  margin-top: 20px; padding: 6px 20px; border: 1px solid #555;
+  border-radius: 6px; background: transparent; color: #888;
+  cursor: pointer; font-size: 13px;
+}
+.seg-overlay .seg-cancel:hover { color: #e0e0e0; border-color: #e0e0e0; }
+
+/* Bg color picker popup */
+.seg-popup {
+  display: none; position: fixed; z-index: 9998;
+  background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
+  padding: 12px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  min-width: 180px;
+}
+.seg-popup.active { display: block; }
+.seg-popup h4 { font-size: 12px; color: #999; margin-bottom: 10px; }
+.seg-popup .bg-opts { display: flex; gap: 8px; margin-bottom: 12px; }
+.seg-popup .bg-opt {
+  flex: 1; padding: 8px; border-radius: 6px; border: 2px solid #333;
+  cursor: pointer; text-align: center; font-size: 12px; color: #ccc;
+  transition: border-color .15s;
+}
+.seg-popup .bg-opt.selected { border-color: #e94560; color: #e94560; }
+.seg-popup .bg-opt .swatch {
+  width: 28px; height: 28px; border-radius: 4px; margin: 0 auto 4px;
+  border: 1px solid #555;
+}
+.seg-popup .btn-confirm {
+  width: 100%; padding: 7px; background: #e94560; border: none;
+  border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px;
+}
+.seg-popup .btn-confirm:hover { background: #c73652; }
