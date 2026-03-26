@@ -77,6 +77,144 @@ def _detect_persons_in_frame(frame, net, conf_threshold=0.5):
             persons.append((x1, y1, x2, y2))
     return persons
 
+def _run_crop_person(task_id, input_path, output_path, target_bbox):
+    """后台线程：逐帧追踪并裁剪选中的人"""
+    import cv2
+    import numpy as np
+    import subprocess
+
+    def update(progress, status, output=None, error=None):
+        with _tasks_lock:
+            _tasks[task_id] = {
+                'progress': progress,
+                'status': status,
+                'output': output,
+                'error': error,
+            }
+
+    tmp_path = output_path + '.tmp.mp4'
+
+    try:
+        update(0, 'processing')
+
+        # 加载检测器
+        net = _load_person_detector()
+
+        cap = cv2.VideoCapture(input_path)
+        if not cap.isOpened():
+            update(0, 'error', error='无法打开视频文件')
+            return
+
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+
+        # 第一遍：收集所有帧的 bbox
+        bboxes = []
+        frame_idx = 0
+        tx1, ty1, tx2, ty2 = target_bbox
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            persons = _detect_persons_in_frame(frame, net)
+
+            # 找到最接近目标 bbox 的人
+            best_bbox = None
+            min_dist = float('inf')
+            for bbox in persons:
+                x1, y1, x2, y2 = bbox
+                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
+                tcx, tcy = (tx1 + tx2) / 2, (ty1 + ty2) / 2
+                dist = ((cx - tcx) ** 2 + (cy - tcy) ** 2) ** 0.5
+                if dist < min_dist:
+                    min_dist = dist
+                    best_bbox = bbox
+
+            if best_bbox:
+                bboxes.append(best_bbox)
+                target_bbox = best_bbox  # 更新目标用于下一帧
+            else:
+                # 未检测到，使用上一帧的 bbox
+                bboxes.append(bboxes[-1] if bboxes else (tx1, ty1, tx2, ty2))
+
+            frame_idx += 1
+            progress = int(frame_idx / total * 45)
+            update(progress, 'processing')
+
+        cap.release()
+
+        # 平滑 bbox
+        bboxes = _smooth_bbox(bboxes)
+
+        # 第二遍：裁剪并写入
+        cap = cv2.VideoCapture(input_path)
+        frame_idx = 0
+        writer = None
+
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            x1, y1, x2, y2 = bboxes[frame_idx]
+            cropped = frame[y1:y2, x1:x2]
+
+            if writer is None:
+                h, w = cropped.shape[:2]
+                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                writer = cv2.VideoWriter(tmp_path, fourcc, fps, (w, h))
+
+            writer.write(cropped)
+
+            frame_idx += 1
+            progress = 45 + int(frame_idx / total * 45)
+            update(progress, 'processing')
+
+        cap.release()
+        if writer:
+            writer.release()
+
+        # 重新编码并保留音频
+        update(92, 'processing')
+        subprocess.run([
+            'ffmpeg', '-y', '-i', tmp_path, '-i', input_path,
+            '-map', '0:v', '-map', '1:a?',
+            '-c:v', 'libx264', '-preset', 'fast',
+            '-crf', '23', '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            '-c:a', 'aac', '-b:a', '128k', output_path,
+        ], check=True, capture_output=True)
+
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+        rel = output_path.replace(os.sep, '/')
+        if not rel.startswith('/'):
+            rel = '/' + rel
+        update(100, 'done', output=rel)
+
+    except Exception as e:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        update(0, 'error', error=str(e))
+
+
+def _smooth_bbox(bboxes, window_size=5):
+    """平滑 bbox 序列，避免抖动"""
+    import numpy as np
+    if len(bboxes) < window_size:
+        return bboxes
+    smoothed = []
+    for i in range(len(bboxes)):
+        start = max(0, i - window_size // 2)
+        end = min(len(bboxes), i + window_size // 2 + 1)
+        window = bboxes[start:end]
+        avg = np.mean(window, axis=0).astype(int)
+        smoothed.append(tuple(avg))
+    return smoothed
+
 # ── 分割相关 ──────────────────────────────────────────────────────────────────
 
 def _output_filename(filename, bg_color):
@@ -304,6 +442,45 @@ def detect_persons():
         })
 
     return jsonify({'persons': results})
+
+@app.route('/crop_person', methods=['POST'])
+def crop_person():
+    """裁剪视频中选中的人物"""
+    data = request.get_json(force=True)
+    filename = data.get('filename', '')
+    bbox = data.get('bbox', [])  # [x1, y1, x2, y2]
+
+    if not filename or not allowed_file(filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+    if len(bbox) != 4:
+        return jsonify({'error': 'Invalid bbox'}), 400
+
+    input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(input_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    # 生成输出文件名
+    name, ext = os.path.splitext(filename)
+    out_name = f"{name}_crop{ext}"
+    output_path = os.path.join(app.config['UPLOAD_FOLDER'], out_name)
+
+    # 缓存检查
+    if os.path.exists(output_path):
+        rel = ('/' + output_path.replace(os.sep, '/')).replace('//', '/')
+        return jsonify({'task_id': None, 'cached': True, 'url': rel})
+
+    task_id = str(uuid.uuid4())
+    with _tasks_lock:
+        _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
+
+    t = threading.Thread(
+        target=_run_crop_person,
+        args=(task_id, input_path, output_path, tuple(bbox)),
+        daemon=True,
+    )
+    t.start()
+
+    return jsonify({'task_id': task_id, 'cached': False})
 
 
 @app.route('/segment', methods=['POST'])
