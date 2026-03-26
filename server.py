@@ -48,6 +48,35 @@ def upload():
     return jsonify({'url': url, 'filename': filename})
 
 
+# ── 人物检测相关 ──────────────────────────────────────────────────────────────
+
+def _load_person_detector():
+    """加载 MobileNet-SSD 人物检测模型"""
+    import cv2
+    prototxt = "models/deploy.prototxt"
+    caffemodel = "models/mobilenet_ssd.caffemodel"
+    net = cv2.dnn.readNetFromCaffe(prototxt, caffemodel)
+    return net
+
+def _detect_persons_in_frame(frame, net, conf_threshold=0.5):
+    """检测帧中的所有人物，返回 bbox 列表 [(x1,y1,x2,y2), ...]"""
+    import cv2
+    h, w = frame.shape[:2]
+    blob = cv2.dnn.blobFromImage(frame, 0.007843, (300, 300), 127.5)
+    net.setInput(blob)
+    detections = net.forward()
+
+    persons = []
+    for i in range(detections.shape[2]):
+        confidence = detections[0, 0, i, 2]
+        class_id = int(detections[0, 0, i, 1])
+        # class_id 15 = person in COCO
+        if class_id == 15 and confidence > conf_threshold:
+            box = detections[0, 0, i, 3:7] * [w, h, w, h]
+            x1, y1, x2, y2 = box.astype(int)
+            persons.append((x1, y1, x2, y2))
+    return persons
+
 # ── 分割相关 ──────────────────────────────────────────────────────────────────
 
 def _output_filename(filename, bg_color):
@@ -229,6 +258,52 @@ def _run_segmentation(task_id, input_path, output_path, bg_color_tuple):
                 'output': None,
                 'error': str(e),
             }
+
+
+@app.route('/detect_persons', methods=['POST'])
+def detect_persons():
+    """检测视频首帧中的所有人物"""
+    import cv2
+    import base64
+
+    data = request.get_json(force=True)
+    filename = data.get('filename', '')
+
+    if not filename or not allowed_file(filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+
+    input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(input_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    # 读取首帧
+    cap = cv2.VideoCapture(input_path)
+    ret, frame = cap.read()
+    cap.release()
+
+    if not ret:
+        return jsonify({'error': 'Cannot read video'}), 400
+
+    # 检测人物
+    net = _load_person_detector()
+    persons = _detect_persons_in_frame(frame, net)
+
+    if not persons:
+        return jsonify({'error': 'No person detected'}), 404
+
+    # 生成每个人的缩略图
+    results = []
+    for idx, (x1, y1, x2, y2) in enumerate(persons):
+        crop = frame[y1:y2, x1:x2]
+        _, buffer = cv2.imencode('.jpg', crop)
+        thumb_b64 = base64.b64encode(buffer).decode('utf-8')
+        results.append({
+            'id': idx,
+            'bbox': [int(x1), int(y1), int(x2), int(y2)],
+            'thumbnail': f'data:image/jpeg;base64,{thumb_b64}'
+        })
+
+    return jsonify({'persons': results})
 
 
 @app.route('/segment', methods=['POST'])
