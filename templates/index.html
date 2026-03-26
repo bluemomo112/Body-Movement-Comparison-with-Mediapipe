@@ -4,170 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dance Trainer</title>
-<style>
-/* ── Reset & Base ───────────────────────────────────────────────── */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-  background: #1a1a2e; color: #e0e0e0;
-  overflow-x: hidden;
-}
-
-/* ── Top Bar ────────────────────────────────────────────────────── */
-.topbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 20px; background: #16213e; border-bottom: 1px solid #0f3460;
-}
-.topbar h1 { font-size: 18px; font-weight: 600; color: #e94560; }
-.topbar .modes { display: flex; gap: 8px; }
-.topbar .hint { font-size: 12px; color: #888; }
-
-/* ── Buttons ────────────────────────────────────────────────────── */
-.btn {
-  padding: 6px 14px; border: 1px solid #0f3460; border-radius: 6px;
-  background: #16213e; color: #e0e0e0; cursor: pointer;
-  font-size: 13px; transition: all .15s;
-}
-.btn:hover { background: #0f3460; }
-.btn.active { background: #e94560; border-color: #e94560; color: #fff; }
-.btn-sm { padding: 4px 10px; font-size: 12px; }
-
-/* ── Video Container ────────────────────────────────────────────── */
-.container { display: flex; height: calc(100vh - 52px); }
-
-/* Side-by-side mode */
-.side-panel {
-  flex: 1; display: flex; flex-direction: column;
-  border-right: 2px solid #0f3460; min-width: 0;
-}
-.side-panel:last-child { border-right: none; }
-.side-panel .label {
-  padding: 6px 12px; font-size: 13px; font-weight: 600;
-  background: #16213e; color: #e94560; text-align: center;
-}
-
-.video-wrap {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  background: #111; overflow: hidden; position: relative;
-}
-.video-wrap video {
-  max-width: 100%; max-height: 100%; object-fit: contain;
-}
-.video-wrap .placeholder {
-  color: #555; font-size: 14px; text-align: center; padding: 20px;
-}
-
-/* ── Controls Panel ─────────────────────────────────────────────── */
-.controls {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
-  padding: 8px 12px; background: #16213e; border-top: 1px solid #0f3460;
-  min-height: 44px;
-}
-.controls .group {
-  display: flex; align-items: center; gap: 4px;
-}
-.controls label { font-size: 11px; color: #999; white-space: nowrap; }
-.controls select, .controls input[type="range"] {
-  background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460;
-  border-radius: 4px; font-size: 12px; padding: 2px 4px;
-}
-.controls input[type="range"] { width: 80px; }
-.controls input[type="file"] { display: none; }
-
-/* progress bar */
-.progress-bar {
-  width: 100%; height: 6px; background: #333; border-radius: 3px;
-  cursor: pointer; position: relative;
-}
-.progress-bar .fill {
-  height: 100%; background: #e94560; border-radius: 3px;
-  pointer-events: none; transition: none;
-}
-.progress-bar .thumb {
-  position: absolute; top: 50%; width: 14px; height: 14px;
-  background: #e94560; border: 2px solid #fff; border-radius: 50%;
-  transform: translate(-50%, -50%); pointer-events: none;
-  box-shadow: 0 0 4px rgba(0,0,0,0.5);
-}
-
-/* ── Fusion Mode ────────────────────────────────────────────────── */
-.fusion-container {
-  position: relative; width: 100%; height: calc(100vh - 52px);
-  background: #111; overflow: hidden; display: none;
-}
-.fusion-video {
-  position: absolute; cursor: grab;
-  transform-origin: center center;
-}
-.fusion-video:active { cursor: grabbing; }
-.fusion-video video {
-  width: 100%; height: 100%; object-fit: contain;
-  pointer-events: none;
-}
-.fusion-video .tag {
-  position: absolute; top: 4px; left: 4px;
-  background: rgba(233,69,96,0.8); color: #fff;
-  padding: 2px 8px; border-radius: 4px; font-size: 11px;
-  pointer-events: none;
-}
-.fusion-video .resize-handle {
-  position: absolute; right: 0; bottom: 0; width: 20px; height: 20px;
-  cursor: nwse-resize; z-index: 10;
-  background: linear-gradient(135deg, transparent 50%, rgba(233,69,96,0.7) 50%);
-  border-radius: 0 0 4px 0;
-}
-
-/* Fusion controls overlay */
-.fusion-controls {
-  position: absolute; bottom: 0; left: 0; right: 0;
-  background: rgba(22,33,62,0.92); padding: 10px 16px;
-  display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
-  border-top: 1px solid #0f3460; z-index: 100;
-}
-.fusion-controls .section {
-  display: flex; align-items: center; gap: 6px;
-  border-right: 1px solid #333; padding-right: 12px;
-}
-.fusion-controls .section:last-child { border-right: none; }
-
-/* Webcam choose overlay */
-.source-choose {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  color: #888;
-}
-
-/* ── Trim Controls ─────────────────────────────────────────────── */
-.trim-bar {
-  width: 100%; padding: 4px 12px; background: #121a30;
-  border-top: 1px solid #0f3460;
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-}
-.trim-bar label { font-size: 11px; color: #999; white-space: nowrap; }
-.trim-bar .trim-val { font-size: 11px; color: #e94560; font-variant-numeric: tabular-nums; min-width: 56px; }
-.trim-range-wrap {
-  flex: 1; position: relative; height: 20px; min-width: 120px;
-}
-.trim-range-wrap .trim-track {
-  position: absolute; top: 8px; left: 0; right: 0; height: 4px;
-  background: #333; border-radius: 2px;
-}
-.trim-range-wrap .trim-highlight {
-  position: absolute; top: 8px; height: 4px;
-  background: #e94560; border-radius: 2px;
-}
-.trim-range-wrap input[type="range"] {
-  position: absolute; top: 0; width: 100%; height: 20px;
-  -webkit-appearance: none; appearance: none;
-  background: transparent; pointer-events: none; margin: 0;
-}
-.trim-range-wrap input[type="range"]::-webkit-slider-thumb {
-  -webkit-appearance: none; appearance: none;
-  width: 12px; height: 12px; border-radius: 50%;
-  background: #e94560; border: 2px solid #fff;
-  cursor: pointer; pointer-events: auto;
-  box-shadow: 0 0 3px rgba(0,0,0,0.5);
-}
-</style>
+<link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
 
@@ -188,7 +25,7 @@ body {
   <div class="side-panel">
     <div class="label">教练视频</div>
     <div class="video-wrap" id="coachWrap">
-      <video id="coachVideo" loop muted playsinline></video>
+      <video id="coachVideo" loop playsinline></video>
       <div class="placeholder" id="coachPlaceholder">
         点击下方「选择文件」上传教练视频
       </div>
@@ -220,6 +57,12 @@ body {
         <button class="btn btn-sm" id="coachMirrorBtn" onclick="toggleMirror('coach')">镜像</button>
       </div>
       <div class="group">
+        <button class="btn btn-sm" id="coachMuteBtn" onclick="toggleMute('coach')">🔊</button>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm btn-seg" id="coachSegBtn" onclick="openSegPopup('coach', this)">✂ 分割</button>
+      </div>
+      <div class="group">
         <label id="coachTime">0:00.00 / 0:00.00</label>
       </div>
     </div>
@@ -242,10 +85,12 @@ body {
     <div class="label">
       用户视频
       <button class="btn btn-sm" id="srcWebcam" onclick="setUserSource('webcam')" style="margin-left:8px;">Webcam</button>
+      <select id="cameraSelect" style="display:none;margin-left:4px;background:#1a1a2e;color:#eee;border:1px solid #444;border-radius:4px;padding:2px 4px;font-size:12px;" onchange="switchCamera(this.value)"></select>
+      <button class="btn btn-sm" id="cameraRefresh" style="display:none;margin-left:2px;padding:2px 6px;" onclick="refreshCameraList()" title="刷新摄像头列表">↺</button>
       <button class="btn btn-sm" id="srcFile" onclick="setUserSource('file')">上传视频</button>
     </div>
     <div class="video-wrap" id="userWrap">
-      <video id="userVideo" loop muted playsinline></video>
+      <video id="userVideo" loop playsinline></video>
       <div class="placeholder" id="userPlaceholder">
         选择「Webcam」或「上传视频」
       </div>
@@ -277,6 +122,12 @@ body {
         <button class="btn btn-sm" id="userMirrorBtn" onclick="toggleMirror('user')">镜像</button>
       </div>
       <div class="group">
+        <button class="btn btn-sm" id="userMuteBtn" onclick="toggleMute('user')">🔇</button>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm btn-seg" id="userSegBtn" onclick="openSegPopup('user', this)">✂ 分割</button>
+      </div>
+      <div class="group">
         <label id="userTime">0:00.00 / 0:00.00</label>
       </div>
     </div>
@@ -299,12 +150,12 @@ body {
 <div class="fusion-container" id="fusionContainer">
   <div class="fusion-video" id="fusionCoach" style="width:50%; left:25%; top:5%;">
     <div class="tag">教练</div>
-    <video id="fusionCoachVideo" loop muted playsinline></video>
+    <video id="fusionCoachVideo" loop playsinline></video>
     <div class="resize-handle"></div>
   </div>
   <div class="fusion-video" id="fusionUser" style="width:50%; left:25%; top:5%;">
     <div class="tag">用户</div>
-    <video id="fusionUserVideo" loop muted playsinline></video>
+    <video id="fusionUserVideo" loop playsinline></video>
     <div class="resize-handle"></div>
   </div>
 
@@ -338,6 +189,7 @@ body {
         <option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option>
       </select>
       <button class="btn btn-sm" onclick="toggleMirror('coach')">镜像</button>
+      <button class="btn btn-sm" id="fusionCoachMuteBtn" onclick="toggleMute('coach')">🔊</button>
       <label>透明度</label>
       <input type="range" min="0" max="100" value="100" oninput="setOpacity('coach', this.value)">
     </div>
@@ -351,6 +203,7 @@ body {
         <option value="1" selected>1x</option><option value="1.5">1.5x</option><option value="2">2x</option>
       </select>
       <button class="btn btn-sm" onclick="toggleMirror('user')">镜像</button>
+      <button class="btn btn-sm" id="fusionUserMuteBtn" onclick="toggleMute('user')">🔇</button>
       <label>透明度</label>
       <input type="range" min="0" max="100" value="60" oninput="setOpacity('user', this.value)">
     </div>
@@ -389,447 +242,35 @@ body {
   </div>
 </div>
 
-<script>
-/* ================================================================
-   State
-   ================================================================ */
-const state = {
-  mode: 'side',       // 'side' | 'fusion'
-  mirror: { coach: false, user: false },
-  userSource: null,    // 'webcam' | 'file'
-  webcamStream: null,
-  trim: {
-    coach: { start: 0, end: 1 },  // 0-1 ratio of duration
-    user:  { start: 0, end: 1 },
-  },
-};
+<!-- ── Segmentation Bg Picker Popup ──────────────────────────── -->
+<div class="seg-popup" id="segPopup">
+  <h4>背景颜色</h4>
+  <div class="bg-opts">
+    <div class="bg-opt selected" id="bgOptWhite" onclick="selectBg('white')">
+      <div class="swatch" style="background:#fff;"></div>白色
+    </div>
+    <div class="bg-opt" id="bgOptBlack" onclick="selectBg('black')">
+      <div class="swatch" style="background:#000;"></div>黑色
+    </div>
+  </div>
+  <button class="btn-confirm" onclick="confirmSegment()">开始分割</button>
+</div>
 
-/* Video element references — always return the ACTIVE video for current mode */
-function vid(role) {
-  if (state.mode === 'side') {
-    return role === 'coach' ? document.getElementById('coachVideo')
-                            : document.getElementById('userVideo');
-  }
-  return role === 'coach' ? document.getElementById('fusionCoachVideo')
-                          : document.getElementById('fusionUserVideo');
-}
+<!-- ── Segmentation Loading Overlay ──────────────────────────── -->
+<div class="seg-overlay" id="segOverlay">
+  <div class="seg-box">
+    <h2>正在分割视频...</h2>
+    <p class="seg-sub" id="segSubtitle">MediaPipe 逐帧处理中，请稍候</p>
+    <div class="seg-progress-track">
+      <div class="seg-progress-fill" id="segProgressFill"></div>
+    </div>
+    <div class="seg-pct" id="segPct">0%</div>
+    <div class="seg-eta" id="segEta">预计剩余时间：计算中...</div>
+    <button class="seg-cancel" onclick="closeSegOverlay()">后台运行（关闭此窗口）</button>
+  </div>
+</div>
 
-/* All video elements for a role (both modes share the same source) */
-function allVids(role) {
-  return role === 'coach'
-    ? [document.getElementById('coachVideo'), document.getElementById('fusionCoachVideo')]
-    : [document.getElementById('userVideo'), document.getElementById('fusionUserVideo')];
-}
-
-/* ================================================================
-   Mode Switching
-   ================================================================ */
-function setMode(m) {
-  state.mode = m;
-  document.getElementById('sideContainer').style.display  = m === 'side' ? 'flex' : 'none';
-  document.getElementById('fusionContainer').style.display = m === 'fusion' ? 'block' : 'none';
-  document.getElementById('btnSide').classList.toggle('active', m === 'side');
-  document.getElementById('btnFusion').classList.toggle('active', m === 'fusion');
-
-  // Sync video sources to fusion videos when entering fusion mode
-  if (m === 'fusion') {
-    syncSourceToFusion('coach');
-    syncSourceToFusion('user');
-  }
-}
-
-function syncSourceToFusion(role) {
-  const sideV = role === 'coach' ? document.getElementById('coachVideo')
-                                 : document.getElementById('userVideo');
-  const fusV  = role === 'coach' ? document.getElementById('fusionCoachVideo')
-                                 : document.getElementById('fusionUserVideo');
-
-  if (role === 'user' && state.userSource === 'webcam' && state.webcamStream) {
-    fusV.srcObject = state.webcamStream;
-    fusV.play().catch(() => {});
-  } else if (sideV.src && sideV.src !== location.href) {
-    fusV.src = sideV.src;
-    fusV.currentTime = sideV.currentTime;
-    fusV.playbackRate = sideV.playbackRate;
-    if (!sideV.paused) fusV.play().catch(() => {});
-  }
-  // Sync mirror
-  const mirrored = state.mirror[role];
-  fusV.style.transform = mirrored ? 'scaleX(-1)' : '';
-}
-
-/* ================================================================
-   File Upload / Source Selection
-   ================================================================ */
-function loadFile(input, role) {
-  const file = input.files[0];
-  if (!file) return;
-  const url = URL.createObjectURL(file);
-  allVids(role).forEach(v => {
-    v.src = url;
-    v.load();
-  });
-  // Hide placeholder
-  const ph = role === 'coach' ? document.getElementById('coachPlaceholder')
-                               : document.getElementById('userPlaceholder');
-  ph.style.display = 'none';
-}
-
-function setUserSource(src) {
-  state.userSource = src;
-  document.getElementById('srcWebcam').classList.toggle('active', src === 'webcam');
-  document.getElementById('srcFile').classList.toggle('active', src === 'file');
-  document.getElementById('userFileLabel').style.display = src === 'file' ? '' : 'none';
-
-  if (src === 'webcam') {
-    startWebcam();
-  } else {
-    stopWebcam();
-  }
-}
-
-async function startWebcam() {
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
-    });
-    state.webcamStream = stream;
-    allVids('user').forEach(v => {
-      v.srcObject = stream;
-      v.play().catch(() => {});
-    });
-    document.getElementById('userPlaceholder').style.display = 'none';
-  } catch (e) {
-    alert('无法访问摄像头：' + e.message);
-  }
-}
-
-function stopWebcam() {
-  if (state.webcamStream) {
-    state.webcamStream.getTracks().forEach(t => t.stop());
-    state.webcamStream = null;
-  }
-  allVids('user').forEach(v => { v.srcObject = null; });
-}
-
-/* ================================================================
-   Playback Controls
-   ================================================================ */
-function togglePlay(role) {
-  const v = vid(role);
-  if (!v.src && !v.srcObject) return;
-  if (v.paused) v.play().catch(() => {});
-  else v.pause();
-}
-
-function setSpeed(role, val) {
-  const s = parseFloat(val);
-  allVids(role).forEach(v => { v.playbackRate = s; });
-}
-
-function toggleMirror(role) {
-  state.mirror[role] = !state.mirror[role];
-  const mirrored = state.mirror[role];
-  allVids(role).forEach(v => {
-    v.style.transform = mirrored ? 'scaleX(-1)' : '';
-  });
-  const btn = document.getElementById(role + 'MirrorBtn');
-  if (btn) btn.classList.toggle('active', mirrored);
-}
-
-function setOpacity(role, val) {
-  const el = role === 'coach' ? document.getElementById('fusionCoach')
-                               : document.getElementById('fusionUser');
-  el.style.opacity = val / 100;
-}
-
-function syncPlayPause() {
-  const cv = vid('coach'), uv = vid('user');
-  const anySrc = (cv.src && cv.src !== location.href) || cv.srcObject
-              || (uv.src && uv.src !== location.href) || uv.srcObject;
-  if (!anySrc) return;
-  if (cv.paused || uv.paused) {
-    cv.play().catch(() => {});
-    uv.play().catch(() => {});
-  } else {
-    cv.pause();
-    uv.pause();
-  }
-}
-
-function syncRestart() {
-  ['coach', 'user'].forEach(role => {
-    const startTime = getTrimStartTime(role);
-    allVids(role).forEach(v => {
-      if (!v.srcObject) v.currentTime = startTime;
-    });
-  });
-}
-
-/* ================================================================
-   Trim Controls
-   ================================================================ */
-function getTrimStartTime(role) {
-  const v = allVids(role)[0];
-  if (!v || !v.duration) return 0;
-  return state.trim[role].start * v.duration;
-}
-
-function getTrimEndTime(role) {
-  const v = allVids(role)[0];
-  if (!v || !v.duration) return 0;
-  return state.trim[role].end * v.duration;
-}
-
-function onTrimChange(role) {
-  const prefix = role === 'coach' ? 'Coach' : 'User';
-  // Read from whichever set of sliders is visible
-  const ids = state.mode === 'fusion'
-    ? ['fusion' + prefix + 'TrimStart', 'fusion' + prefix + 'TrimEnd']
-    : [role + 'TrimStart', role + 'TrimEnd'];
-
-  let startVal = parseInt(document.getElementById(ids[0]).value);
-  let endVal   = parseInt(document.getElementById(ids[1]).value);
-
-  // Enforce min gap
-  if (startVal >= endVal) {
-    if (endVal < 1000) endVal = startVal + 1;
-    else startVal = endVal - 1;
-    document.getElementById(ids[0]).value = startVal;
-    document.getElementById(ids[1]).value = endVal;
-  }
-
-  state.trim[role].start = startVal / 1000;
-  state.trim[role].end   = endVal / 1000;
-
-  // Sync sliders between modes
-  syncTrimSliders(role);
-  updateTrimDisplay(role);
-}
-
-function syncTrimSliders(role) {
-  const prefix = role === 'coach' ? 'Coach' : 'User';
-  const s = Math.round(state.trim[role].start * 1000);
-  const e = Math.round(state.trim[role].end * 1000);
-
-  // Side sliders
-  const ss = document.getElementById(role + 'TrimStart');
-  const se = document.getElementById(role + 'TrimEnd');
-  if (ss) ss.value = s;
-  if (se) se.value = e;
-
-  // Fusion sliders
-  const fs = document.getElementById('fusion' + prefix + 'TrimStart');
-  const fe = document.getElementById('fusion' + prefix + 'TrimEnd');
-  if (fs) fs.value = s;
-  if (fe) fe.value = e;
-}
-
-function updateTrimDisplay(role) {
-  const prefix = role === 'coach' ? 'Coach' : 'User';
-  const v = allVids(role)[0];
-  const dur = (v && v.duration) ? v.duration : 0;
-  const startT = state.trim[role].start * dur;
-  const endT   = state.trim[role].end * dur;
-  const trimDur = endT - startT;
-  const startPct = state.trim[role].start * 100;
-  const endPct   = state.trim[role].end * 100;
-
-  // Side-by-side display
-  const sv = document.getElementById(role + 'TrimStartVal');
-  const ev = document.getElementById(role + 'TrimEndVal');
-  const dd = document.getElementById(role + 'TrimDuration');
-  const sh = document.getElementById(role + 'TrimHighlight');
-  if (sv) sv.textContent = fmtTime(startT);
-  if (ev) ev.textContent = fmtTime(endT);
-  if (dd) dd.textContent = '= ' + trimDur.toFixed(2) + 's';
-  if (sh) { sh.style.left = startPct + '%'; sh.style.width = (endPct - startPct) + '%'; }
-
-  // Fusion display
-  const fsv = document.getElementById('fusion' + prefix + 'TrimStartVal');
-  const fev = document.getElementById('fusion' + prefix + 'TrimEndVal');
-  const fdd = document.getElementById('fusion' + prefix + 'TrimDuration');
-  const fsh = document.getElementById('fusion' + prefix + 'TrimHighlight');
-  if (fsv) fsv.textContent = fmtTime(startT);
-  if (fev) fev.textContent = fmtTime(endT);
-  if (fdd) fdd.textContent = '= ' + trimDur.toFixed(2) + 's';
-  if (fsh) { fsh.style.left = startPct + '%'; fsh.style.width = (endPct - startPct) + '%'; }
-}
-
-/* Enforce trim bounds during playback */
-function enforceTrimBounds() {
-  ['coach', 'user'].forEach(role => {
-    allVids(role).forEach(v => {
-      if (!v.duration || v.srcObject) return;
-      const startT = state.trim[role].start * v.duration;
-      const endT   = state.trim[role].end * v.duration;
-      if (v.currentTime >= endT - 0.05) {
-        v.currentTime = startT;
-      }
-      if (v.currentTime < startT - 0.1) {
-        v.currentTime = startT;
-      }
-    });
-  });
-  requestAnimationFrame(enforceTrimBounds);
-}
-requestAnimationFrame(enforceTrimBounds);
-
-/* Update trim display when video metadata loads */
-['coachVideo', 'userVideo', 'fusionCoachVideo', 'fusionUserVideo'].forEach(id => {
-  document.getElementById(id).addEventListener('loadedmetadata', () => {
-    const role = id.includes('oach') ? 'coach' : 'user';
-    updateTrimDisplay(role);
-  });
-});
-
-function seekVideo(event, role) {
-  const bar = event.currentTarget;
-  const pct = Math.max(0, Math.min(1, event.offsetX / bar.offsetWidth));
-  const v = vid(role);
-  if (v.duration) v.currentTime = pct * v.duration;
-}
-
-/* ================================================================
-   Progress Bar Dragging
-   ================================================================ */
-(function initProgressDrag() {
-  const bars = [
-    { barId: 'coachProgress', role: 'coach' },
-    { barId: 'userProgress', role: 'user' },
-    { barId: 'fusionCoachProgress', role: 'coach' },
-    { barId: 'fusionUserProgress', role: 'user' },
-  ];
-  bars.forEach(({ barId, role }) => {
-    const bar = document.getElementById(barId);
-    if (!bar) return;
-    let seeking = false;
-
-    function doSeek(e) {
-      const rect = bar.getBoundingClientRect();
-      const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const v = vid(role);
-      if (v && v.duration) v.currentTime = pct * v.duration;
-    }
-
-    bar.addEventListener('mousedown', e => {
-      seeking = true;
-      doSeek(e);
-      e.preventDefault();
-    });
-    document.addEventListener('mousemove', e => {
-      if (seeking) doSeek(e);
-    });
-    document.addEventListener('mouseup', () => { seeking = false; });
-  });
-})();
-
-/* ================================================================
-   Progress Bar & Time Display Update
-   ================================================================ */
-function fmtTime(s) {
-  if (!s || isNaN(s)) return '0:00.00';
-  const m = Math.floor(s / 60);
-  const sec = Math.floor(s % 60);
-  const cs = Math.floor((s % 1) * 100);
-  return m + ':' + String(sec).padStart(2, '0') + '.' + String(cs).padStart(2, '0');
-}
-
-function updateProgress() {
-  ['coach', 'user'].forEach(role => {
-    const sideV = document.getElementById(role + 'Video');
-    const fusV  = document.getElementById('fusion' + (role === 'coach' ? 'Coach' : 'User') + 'Video');
-    const prefix = role === 'coach' ? 'Coach' : 'User';
-
-    // Side-by-side elements
-    const sideFill  = document.getElementById(role + 'Fill');
-    const sideThumb = document.getElementById(role + 'Thumb');
-    const sideTime  = document.getElementById(role + 'Time');
-    // Fusion elements
-    const fusFill   = document.getElementById('fusion' + prefix + 'Fill');
-    const fusThumb  = document.getElementById('fusion' + prefix + 'Thumb');
-    const fusTime   = document.getElementById('fusion' + prefix + 'Time');
-
-    // Update side-by-side
-    if (sideV && sideV.duration) {
-      const pct = (sideV.currentTime / sideV.duration) * 100;
-      if (sideFill)  sideFill.style.width = pct + '%';
-      if (sideThumb) sideThumb.style.left = pct + '%';
-      if (sideTime)  sideTime.textContent = fmtTime(sideV.currentTime) + ' / ' + fmtTime(sideV.duration);
-    }
-    // Update fusion
-    if (fusV && fusV.duration) {
-      const pct = (fusV.currentTime / fusV.duration) * 100;
-      if (fusFill)  fusFill.style.width = pct + '%';
-      if (fusThumb) fusThumb.style.left = pct + '%';
-      if (fusTime)  fusTime.textContent = fmtTime(fusV.currentTime) + ' / ' + fmtTime(fusV.duration);
-    }
-  });
-  requestAnimationFrame(updateProgress);
-}
-requestAnimationFrame(updateProgress);
-
-/* ================================================================
-   Keyboard Shortcuts
-   ================================================================ */
-document.addEventListener('keydown', e => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  if (e.code === 'Space') {
-    e.preventDefault();
-    syncPlayPause();
-  }
-});
-
-/* ================================================================
-   Fusion Mode: Drag & Zoom
-   ================================================================ */
-(function initFusionDrag() {
-  const els = ['fusionCoach', 'fusionUser'];
-  els.forEach(id => {
-    const el = document.getElementById(id);
-    const handle = el.querySelector('.resize-handle');
-    let dragging = false, resizing = false, startX, startY, origLeft, origTop, origW;
-
-    // Resize via corner handle
-    handle.addEventListener('mousedown', e => {
-      e.stopPropagation();
-      resizing = true;
-      startX = e.clientX;
-      origW = el.offsetWidth;
-      e.preventDefault();
-    });
-
-    // Move via body
-    el.addEventListener('mousedown', e => {
-      if (resizing) return;
-      dragging = true;
-      startX = e.clientX; startY = e.clientY;
-      origLeft = el.offsetLeft; origTop = el.offsetTop;
-      e.preventDefault();
-    });
-
-    document.addEventListener('mousemove', e => {
-      if (resizing) {
-        const w = Math.max(160, Math.min(window.innerWidth, origW + e.clientX - startX));
-        el.style.width = w + 'px';
-      } else if (dragging) {
-        el.style.left = (origLeft + e.clientX - startX) + 'px';
-        el.style.top  = (origTop  + e.clientY - startY) + 'px';
-      }
-    });
-
-    document.addEventListener('mouseup', () => { dragging = false; resizing = false; });
-
-    // Scroll to resize (keep existing)
-    el.addEventListener('wheel', e => {
-      e.preventDefault();
-      let w = el.offsetWidth;
-      const delta = e.deltaY > 0 ? -40 : 40;
-      w = Math.max(160, Math.min(window.innerWidth, w + delta));
-      el.style.width = w + 'px';
-    }, { passive: false });
-  });
-})();
+<script src="/static/js/app.js"></script>
 </script>
 </body>
 </html>
