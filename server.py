@@ -291,6 +291,76 @@ def segment_progress(task_id):
                     headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'})
 
 
+def _extract_audio_and_align(video1_path, video2_path):
+    """提取两个视频的音频并计算时间偏移"""
+    import subprocess
+    import tempfile
+    import numpy as np
+    from scipy.io import wavfile
+    from scipy.signal import correlate
+
+    try:
+        # 提取音频为单声道 WAV
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp1, \
+             tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp2:
+            wav1, wav2 = tmp1.name, tmp2.name
+
+        for video_path, wav_path in [(video1_path, wav1), (video2_path, wav2)]:
+            subprocess.run([
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-ac', '1', '-ar', '16000', '-f', 'wav', wav_path
+            ], check=True, capture_output=True, stderr=subprocess.DEVNULL)
+
+        # 读取音频
+        sr1, audio1 = wavfile.read(wav1)
+        sr2, audio2 = wavfile.read(wav2)
+
+        if sr1 != sr2:
+            return {'error': 'Sample rates do not match'}
+
+        # 归一化
+        audio1 = audio1.astype(np.float32) / np.max(np.abs(audio1))
+        audio2 = audio2.astype(np.float32) / np.max(np.abs(audio2))
+
+        # 交叉相关
+        correlation = correlate(audio1, audio2, mode='full')
+        lag = np.argmax(correlation) - len(audio2) + 1
+        offset_seconds = lag / sr1
+
+        # 清理临时文件
+        os.remove(wav1)
+        os.remove(wav2)
+
+        return {'offset': float(offset_seconds)}
+
+    except Exception as e:
+        return {'error': str(e)}
+
+
+@app.route('/align', methods=['POST'])
+def align():
+    """音频对齐接口"""
+    data = request.get_json(force=True)
+    coach_file = data.get('coach_filename', '')
+    user_file = data.get('user_filename', '')
+
+    if not coach_file or not user_file:
+        return jsonify({'error': 'Missing filenames'}), 400
+
+    coach_path = os.path.join(app.config['UPLOAD_FOLDER'], coach_file)
+    user_path = os.path.join(app.config['UPLOAD_FOLDER'], user_file)
+
+    if not os.path.exists(coach_path) or not os.path.exists(user_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    result = _extract_audio_and_align(coach_path, user_path)
+
+    if 'error' in result:
+        return jsonify(result), 500
+
+    return jsonify(result)
+
+
 if __name__ == '__main__':
     print("\n  Dance Trainer Web")
     print("  http://localhost:5050\n")

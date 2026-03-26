@@ -128,12 +128,19 @@ async function startWebcam(deviceId) {
 
 async function populateCameraList(activeDeviceId) {
   const sel = document.getElementById('cameraSelect');
+  const refreshBtn = document.getElementById('cameraRefresh');
   const devices = await navigator.mediaDevices.enumerateDevices();
   const cameras = devices.filter(d => d.kind === 'videoinput');
   sel.innerHTML = cameras.map((d, i) =>
     `<option value="${d.deviceId}" ${d.deviceId === activeDeviceId ? 'selected' : ''}>${d.label || '摄像头 ' + (i + 1)}</option>`
   ).join('');
-  sel.style.display = cameras.length > 1 ? '' : 'none';
+  sel.style.display = '';
+  if (refreshBtn) refreshBtn.style.display = '';
+}
+
+async function refreshCameraList() {
+  const sel = document.getElementById('cameraSelect');
+  await populateCameraList(sel.value);
 }
 
 async function switchCamera(deviceId) {
@@ -151,6 +158,8 @@ function stopWebcam() {
   }
   allVids('user').forEach(v => { v.srcObject = null; });
   document.getElementById('cameraSelect').style.display = 'none';
+  const refreshBtn = document.getElementById('cameraRefresh');
+  if (refreshBtn) refreshBtn.style.display = 'none';
 }
 
 /* ================================================================
@@ -216,6 +225,66 @@ function syncRestart() {
       if (!v.srcObject) v.currentTime = startTime;
     });
   });
+}
+
+async function smartAlign() {
+  const coachFile = segState.coach?.filename;
+  const userFile = segState.user?.filename;
+
+  if (!coachFile || !userFile) {
+    alert('请先上传教练和用户视频');
+    return;
+  }
+
+  const btn = document.getElementById('alignBtn');
+  const origText = btn.textContent;
+  btn.textContent = '分析中...';
+  btn.disabled = true;
+
+  try {
+    const res = await fetch('/align', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ coach_filename: coachFile, user_filename: userFile })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      alert('对齐失败：' + data.error);
+      return;
+    }
+
+    const offset = data.offset;
+    const absOffset = Math.abs(offset);
+    const direction = offset > 0 ? '向后' : '向前';
+    const targetRole = offset > 0 ? 'user' : 'coach';
+
+    if (confirm(`检测到${targetRole === 'user' ? '用户' : '教练'}视频应${direction}偏移 ${absOffset.toFixed(2)} 秒，是否应用？`)) {
+      applyOffset(targetRole, absOffset);
+    }
+  } catch (e) {
+    alert('对齐失败：' + e.message);
+  } finally {
+    btn.textContent = origText;
+    btn.disabled = false;
+  }
+}
+
+function applyOffset(role, offsetSec) {
+  const v = allVids(role)[0];
+  if (!v || !v.duration) return;
+  const newStart = Math.max(0, Math.min(1, offsetSec / v.duration));
+  state.trim[role].start = newStart;
+
+  // Update trim sliders
+  const prefix = role === 'coach' ? 'Coach' : 'User';
+  const startSlider = document.getElementById(role + 'TrimStart');
+  const fusionStartSlider = document.getElementById('fusion' + prefix + 'TrimStart');
+  if (startSlider) startSlider.value = Math.round(newStart * 1000);
+  if (fusionStartSlider) fusionStartSlider.value = Math.round(newStart * 1000);
+
+  onTrimChange(role);
+  allVids(role).forEach(vid => { vid.currentTime = newStart * vid.duration; });
 }
 
 /* ================================================================
@@ -504,9 +573,17 @@ async function uploadToServer(file, role) {
     if (data.filename) {
       segState[role].filename = data.filename;
       segState[role].origUrl = null;  // will be set from blob url
+      checkAlignButton();
     }
   } catch (e) {
     console.warn('Upload failed:', e);
+  }
+}
+
+function checkAlignButton() {
+  const btn = document.getElementById('alignBtn');
+  if (btn && segState.coach?.filename && segState.user?.filename) {
+    btn.style.display = '';
   }
 }
 
