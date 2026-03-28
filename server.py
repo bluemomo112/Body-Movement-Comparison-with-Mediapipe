@@ -58,6 +58,33 @@ def _load_person_detector():
     net = cv2.dnn.readNetFromCaffe(prototxt, caffemodel)
     return net
 
+
+def _compute_iou(bbox1, bbox2):
+    """计算两个 bbox 的交并比 (IOU)"""
+    x1_1, y1_1, x2_1, y2_1 = bbox1
+    x1_2, y1_2, x2_2, y2_2 = bbox2
+
+    # 计算交集
+    x1_i = max(x1_1, x1_2)
+    y1_i = max(y1_1, y1_2)
+    x2_i = min(x2_1, x2_2)
+    y2_i = min(y2_1, y2_2)
+
+    if x2_i < x1_i or y2_i < y1_i:
+        return 0.0
+
+    inter_area = (x2_i - x1_i) * (y2_i - y1_i)
+
+    # 计算并集
+    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+    union_area = area1 + area2 - inter_area
+
+    if union_area == 0:
+        return 0.0
+
+    return inter_area / union_area
+
 def _detect_persons_in_frame(frame, net, conf_threshold=0.5):
     """检测帧中的所有人物，返回 bbox 列表 [(x1,y1,x2,y2), ...]"""
     import cv2
@@ -70,12 +97,45 @@ def _detect_persons_in_frame(frame, net, conf_threshold=0.5):
     for i in range(detections.shape[2]):
         confidence = detections[0, 0, i, 2]
         class_id = int(detections[0, 0, i, 1])
-        # class_id 15 = person in COCO
+        # class_id 15 = person in MobileNet-SSD VOC labels
         if class_id == 15 and confidence > conf_threshold:
             box = detections[0, 0, i, 3:7] * [w, h, w, h]
             x1, y1, x2, y2 = box.astype(int)
             persons.append((x1, y1, x2, y2))
     return persons
+
+
+def _expand_and_clip_bbox(bbox, frame_w, frame_h, pad_ratio=0.12):
+    """扩展并裁剪 bbox，避免越界和过紧"""
+    x1, y1, x2, y2 = [int(v) for v in bbox]
+    if x1 > x2:
+        x1, x2 = x2, x1
+    if y1 > y2:
+        y1, y2 = y2, y1
+
+    box_w = max(2, x2 - x1)
+    box_h = max(2, y2 - y1)
+    pad_x = max(8, int(box_w * pad_ratio))
+    pad_y = max(8, int(box_h * pad_ratio))
+
+    x1 = max(0, x1 - pad_x)
+    y1 = max(0, y1 - pad_y)
+    x2 = min(frame_w, x2 + pad_x)
+    y2 = min(frame_h, y2 + pad_y)
+
+    if x2 <= x1:
+        x2 = min(frame_w, x1 + 2)
+    if y2 <= y1:
+        y2 = min(frame_h, y1 + 2)
+
+    return (x1, y1, x2, y2)
+
+
+def _crop_output_filename(filename, bbox):
+    """生成裁剪输出文件名，避免不同人物互相覆盖缓存"""
+    name, _ = os.path.splitext(filename)
+    tag = '_'.join(str(int(v)) for v in bbox)
+    return f"{name}_crop_{tag}.mp4"
 
 def _run_crop_person(task_id, input_path, output_path, target_bbox):
     """后台线程：逐帧追踪并裁剪选中的人"""
@@ -93,6 +153,7 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
             }
 
     tmp_path = output_path + '.tmp.mp4'
+    log_path = output_path + '.log'
 
     try:
         update(0, 'processing')
@@ -107,11 +168,24 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
 
         total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
+        frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 0
+        target_bbox = _expand_and_clip_bbox(target_bbox, frame_w, frame_h)
+
+        # 初始化日志
+        log_file = open(log_path, 'w', encoding='utf-8')
+        log_file.write(f"=== 裁剪任务日志 ===\n")
+        log_file.write(f"输入视频: {input_path}\n")
+        log_file.write(f"视频尺寸: {frame_w}x{frame_h}, FPS: {fps}, 总帧数: {total}\n")
+        log_file.write(f"初始目标bbox: {target_bbox}\n\n")
 
         # 第一遍：收集所有帧的 bbox
         bboxes = []
         frame_idx = 0
         tx1, ty1, tx2, ty2 = target_bbox
+        initial_bbox = target_bbox  # 保存初始bbox作为参考
+
+        detection_stats = {'detected': 0, 'fallback': 0, 'no_detection': 0}
 
         while True:
             ret, frame = cap.read()
@@ -120,24 +194,37 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
 
             persons = _detect_persons_in_frame(frame, net)
 
-            # 找到最接近目标 bbox 的人
+            # 用 IOU 找到最匹配目标 bbox 的人
             best_bbox = None
-            min_dist = float('inf')
+            max_iou = 0.0
             for bbox in persons:
-                x1, y1, x2, y2 = bbox
-                cx, cy = (x1 + x2) / 2, (y1 + y2) / 2
-                tcx, tcy = (tx1 + tx2) / 2, (ty1 + ty2) / 2
-                dist = ((cx - tcx) ** 2 + (cy - tcy) ** 2) ** 0.5
-                if dist < min_dist:
-                    min_dist = dist
+                iou = _compute_iou(target_bbox, bbox)
+                if iou > max_iou:
+                    max_iou = iou
                     best_bbox = bbox
 
-            if best_bbox:
+            # 只有 IOU > 0.3 才认为是同一个人
+            if best_bbox and max_iou > 0.3:
+                best_bbox = _expand_and_clip_bbox(best_bbox, frame_w, frame_h)
                 bboxes.append(best_bbox)
                 target_bbox = best_bbox  # 更新目标用于下一帧
+                detection_stats['detected'] += 1
+
+                # 每100帧记录一次
+                if frame_idx % 100 == 0:
+                    log_file.write(f"帧{frame_idx}: 检测到 {len(persons)} 个人, IOU={max_iou:.3f}, bbox={best_bbox}\n")
             else:
-                # 未检测到，使用上一帧的 bbox
-                bboxes.append(bboxes[-1] if bboxes else (tx1, ty1, tx2, ty2))
+                # IOU 太低或未检测到，使用上一帧的 bbox（但不再扩展）
+                fallback_bbox = bboxes[-1] if bboxes else initial_bbox
+                bboxes.append(fallback_bbox)  # 直接使用，不再调用 _expand_and_clip_bbox
+
+                if len(persons) == 0:
+                    detection_stats['no_detection'] += 1
+                else:
+                    detection_stats['fallback'] += 1
+
+                if frame_idx % 100 == 0:
+                    log_file.write(f"帧{frame_idx}: 使用fallback, 检测到{len(persons)}个人, max_iou={max_iou:.3f}\n")
 
             frame_idx += 1
             progress = int(frame_idx / total * 45)
@@ -145,13 +232,29 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
 
         cap.release()
 
+        log_file.write(f"\n检测统计: 成功={detection_stats['detected']}, fallback={detection_stats['fallback']}, 无检测={detection_stats['no_detection']}\n")
+
         # 平滑 bbox
         bboxes = _smooth_bbox(bboxes)
+
+        # 计算统一的裁剪尺寸（使用95百分位数，避免异常大的bbox影响）
+        widths = [x2 - x1 for x1, y1, x2, y2 in bboxes]
+        heights = [y2 - y1 for x1, y1, x2, y2 in bboxes]
+        max_w = int(np.percentile(widths, 95))
+        max_h = int(np.percentile(heights, 95))
+        crop_w = int(max_w * 1.2)  # 留20%边距
+        crop_h = int(max_h * 1.2)
+
+        log_file.write(f"\n裁剪尺寸计算:\n")
+        log_file.write(f"  宽度范围: {min(widths)}-{max(widths)}, 95%={max_w}\n")
+        log_file.write(f"  高度范围: {min(heights)}-{max(heights)}, 95%={max_h}\n")
+        log_file.write(f"  最终裁剪尺寸: {crop_w}x{crop_h}\n\n")
 
         # 第二遍：裁剪并写入
         cap = cv2.VideoCapture(input_path)
         frame_idx = 0
-        writer = None
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(tmp_path, fourcc, fps, (crop_w, crop_h))
 
         while True:
             ret, frame = cap.read()
@@ -159,12 +262,24 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
                 break
 
             x1, y1, x2, y2 = bboxes[frame_idx]
-            cropped = frame[y1:y2, x1:x2]
+            cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
-            if writer is None:
-                h, w = cropped.shape[:2]
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-                writer = cv2.VideoWriter(tmp_path, fourcc, fps, (w, h))
+            # 以人物中心为基准，裁剪固定大小区域
+            crop_x1 = max(0, cx - crop_w // 2)
+            crop_y1 = max(0, cy - crop_h // 2)
+            crop_x2 = min(frame_w, crop_x1 + crop_w)
+            crop_y2 = min(frame_h, crop_y1 + crop_h)
+
+            # 调整确保尺寸一致
+            if crop_x2 - crop_x1 < crop_w:
+                crop_x1 = max(0, crop_x2 - crop_w)
+            if crop_y2 - crop_y1 < crop_h:
+                crop_y1 = max(0, crop_y2 - crop_h)
+
+            cropped = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+
+            if cropped.shape[:2] != (crop_h, crop_w):
+                cropped = cv2.resize(cropped, (crop_w, crop_h))
 
             writer.write(cropped)
 
@@ -173,8 +288,7 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
             update(progress, 'processing')
 
         cap.release()
-        if writer:
-            writer.release()
+        writer.release()
 
         # 重新编码并保留音频
         update(92, 'processing')
@@ -215,192 +329,10 @@ def _smooth_bbox(bboxes, window_size=5):
         smoothed.append(tuple(avg))
     return smoothed
 
-# ── 分割相关 ──────────────────────────────────────────────────────────────────
-
-def _output_filename(filename, bg_color):
-    """生成分割输出文件名"""
-    name, _ = os.path.splitext(filename)
-    suffix = 'white' if bg_color == 'white' else 'black'
-    return f"{name}_seg_{suffix}.mp4"
-
-
-def _postprocess_mask(mask_bin, kernel_size=5, blur_size=11):
-    """形态学后处理 + 边缘模糊，提升 mask 质量"""
-    import cv2
-    import numpy as np
-    # 闭操作填补空洞
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    mask_clean = cv2.morphologyEx(mask_bin, cv2.MORPH_CLOSE, kernel, iterations=2)
-    # 开操作去除噪点
-    mask_clean = cv2.morphologyEx(mask_clean, cv2.MORPH_OPEN, kernel, iterations=1)
-    # 高斯模糊平滑边缘
-    mask_blur = cv2.GaussianBlur(
-        mask_clean.astype(np.float32), (blur_size, blur_size), 0
-    )
-    return mask_blur[:, :, np.newaxis]
-
-
-def _seg_frame_rembg(frame_rgb, session):
-    """用 rembg 分割单帧，返回 0/1 二值 mask"""
-    import numpy as np
-    from rembg import remove
-    # rembg 返回 RGBA，alpha 通道即为 mask
-    rgba = remove(frame_rgb, session=session, only_mask=False,
-                  bgcolor=None, alpha_matting=False)
-    alpha = rgba[:, :, 3].astype(np.float32) / 255.0
-    mask_bin = (alpha > 0.5).astype(np.uint8)
-    return mask_bin
-
-
-def _seg_frame_mediapipe(frame_rgb, pose, segmenter, w, h):
-    """MediaPipe fallback 分割，返回 0/1 二值 mask"""
-    import cv2
-    import numpy as np
-    pose_result = pose.process(frame_rgb)
-    seg_result = segmenter.process(frame_rgb)
-    mask = seg_result.segmentation_mask  # float32 0~1
-
-    # 用 pose bounding box 限制 mask，只保留主要人物
-    if pose_result.pose_landmarks:
-        lms = pose_result.pose_landmarks.landmark
-        xs = [lm.x for lm in lms]
-        ys = [lm.y for lm in lms]
-        pad = 0.15
-        x_min = max(0, int((min(xs) - pad) * w))
-        x_max = min(w, int((max(xs) + pad) * w))
-        y_min = max(0, int((min(ys) - pad) * h))
-        y_max = min(h, int((max(ys) + pad) * h))
-        region = np.zeros((h, w), dtype=np.float32)
-        region[y_min:y_max, x_min:x_max] = 1.0
-        mask = mask * region
-
-    mask_bin = (mask > 0.3).astype(np.uint8)
-    return mask_bin
-
-
-def _run_segmentation(task_id, input_path, output_path, bg_color_tuple):
-    """后台线程：逐帧分割并写出新视频（rembg 优先，MediaPipe fallback）"""
-    import cv2
-    import numpy as np
-    import subprocess
-
-    def update(progress, status, output=None, error=None):
-        with _tasks_lock:
-            _tasks[task_id] = {
-                'progress': progress,
-                'status': status,
-                'output': output,
-                'error': error,
-            }
-
-    # Write to a temp file first, then re-encode to H.264 for browser compat
-    tmp_path = output_path + '.tmp.mp4'
-
-    try:
-        update(0, 'processing')
-
-        # 尝试加载 rembg
-        use_rembg = False
-        rembg_session = None
-        try:
-            from rembg import new_session
-            rembg_session = new_session(model_name="u2net")
-            use_rembg = True
-            print("[seg] 使用 rembg (U2-Net) 高精度分割")
-        except Exception as e:
-            print(f"[seg] rembg 不可用 ({e})，回退到 MediaPipe")
-
-        cap = cv2.VideoCapture(input_path)
-        if not cap.isOpened():
-            update(0, 'error', error='无法打开视频文件')
-            return
-
-        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
-        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-        writer = cv2.VideoWriter(tmp_path, fourcc, fps, (w, h))
-
-        bg = np.full((h, w, 3), bg_color_tuple, dtype=np.uint8)
-
-        # MediaPipe fallback context
-        import mediapipe as mp
-        mp_pose = mp.solutions.pose
-        mp_seg = mp.solutions.selfie_segmentation
-
-        with mp_pose.Pose(
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-            model_complexity=1,
-        ) as pose, mp_seg.SelfieSegmentation(model_selection=0) as segmenter:
-
-            frame_idx = 0
-            while True:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-                if use_rembg:
-                    mask_bin = _seg_frame_rembg(frame_rgb, rembg_session)
-                else:
-                    mask_bin = _seg_frame_mediapipe(frame_rgb, pose, segmenter, w, h)
-
-                # 后处理：形态学 + 边缘模糊
-                mask_blur = _postprocess_mask(mask_bin)
-
-                # 合成：人物保留，背景替换
-                out_rgb = (frame_rgb * mask_blur + bg * (1 - mask_blur)).astype(np.uint8)
-                out_bgr = cv2.cvtColor(out_rgb, cv2.COLOR_RGB2BGR)
-                writer.write(out_bgr)
-
-                frame_idx += 1
-                # Reserve 0-95% for frame processing, 95-100% for ffmpeg
-                progress = int(frame_idx / total * 95)
-                update(progress, 'processing')
-
-        cap.release()
-        writer.release()
-
-        # Re-encode to H.264 for browser compatibility
-        update(96, 'processing')
-        try:
-            subprocess.run([
-                'ffmpeg', '-y', '-i', tmp_path,
-                '-c:v', 'libx264', '-preset', 'fast',
-                '-crf', '23', '-pix_fmt', 'yuv420p',
-                '-movflags', '+faststart',
-                '-c:a', 'aac', '-b:a', '128k', output_path,
-            ], check=True, capture_output=True)
-        finally:
-            if os.path.exists(tmp_path):
-                os.remove(tmp_path)
-
-        # 生成可访问 URL
-        rel = output_path.replace(os.sep, '/')
-        if not rel.startswith('/'):
-            rel = '/' + rel
-        update(100, 'done', output=rel)
-
-    except Exception as e:
-        # Clean up temp file on error
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        with _tasks_lock:
-            _tasks[task_id] = {
-                'progress': 0,
-                'status': 'error',
-                'output': None,
-                'error': str(e),
-            }
-
 
 @app.route('/detect_persons', methods=['POST'])
 def detect_persons():
-    """检测视频首帧中的所有人物"""
+    """检测视频多帧中的所有人物（避免首帧漏检）"""
     import cv2
     import base64
 
@@ -414,25 +346,76 @@ def detect_persons():
     if not os.path.exists(input_path):
         return jsonify({'error': 'File not found'}), 404
 
-    # 读取首帧
     cap = cv2.VideoCapture(input_path)
-    ret, frame = cap.read()
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+    # 采样策略：前3秒，每10帧采样一次
+    max_sample_frames = min(int(fps * 3), total_frames)
+    sample_interval = 10
+
+    net = _load_person_detector()
+    all_persons = []  # 收集所有检测到的 bbox
+
+    frame_idx = 0
+    while frame_idx < max_sample_frames:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        persons = _detect_persons_in_frame(frame, net)
+        all_persons.extend(persons)
+        frame_idx += sample_interval
+
+    cap.release()
+
+    if not all_persons:
+        return jsonify({'error': 'No person detected'}), 404
+
+    # 去重：合并IoU > 0.5 的 bbox
+    def iou(box1, box2):
+        x1 = max(box1[0], box2[0])
+        y1 = max(box1[1], box2[1])
+        x2 = min(box1[2], box2[2])
+        y2 = min(box1[3], box2[3])
+        inter = max(0, x2 - x1) * max(0, y2 - y1)
+        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
+        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
+        return inter / (area1 + area2 - inter + 1e-6)
+
+    unique_persons = []
+    for bbox in all_persons:
+        merged = False
+        for i, existing in enumerate(unique_persons):
+            if iou(bbox, existing) > 0.5:
+                # 合并：取平均
+                unique_persons[i] = [
+                    (bbox[0] + existing[0]) / 2,
+                    (bbox[1] + existing[1]) / 2,
+                    (bbox[2] + existing[2]) / 2,
+                    (bbox[3] + existing[3]) / 2
+                ]
+                merged = True
+                break
+        if not merged:
+            unique_persons.append(bbox)
+
+    # 读取首帧生成缩略图
+    cap = cv2.VideoCapture(input_path)
+    ret, first_frame = cap.read()
     cap.release()
 
     if not ret:
-        return jsonify({'error': 'Cannot read video'}), 400
+        return jsonify({'error': 'Cannot read video for thumbnails'}), 400
 
-    # 检测人物
-    net = _load_person_detector()
-    persons = _detect_persons_in_frame(frame, net)
-
-    if not persons:
-        return jsonify({'error': 'No person detected'}), 404
-
-    # 生成每个人的缩略图
     results = []
-    for idx, (x1, y1, x2, y2) in enumerate(persons):
-        crop = frame[y1:y2, x1:x2]
+    for idx, (x1, y1, x2, y2) in enumerate(unique_persons):
+        x1, y1, x2, y2 = _expand_and_clip_bbox((int(x1), int(y1), int(x2), int(y2)),
+                                                first_frame.shape[1], first_frame.shape[0])
+        crop = first_frame[y1:y2, x1:x2]
+        if crop.size == 0:
+            continue
         _, buffer = cv2.imencode('.jpg', crop)
         thumb_b64 = base64.b64encode(buffer).decode('utf-8')
         results.append({
@@ -441,11 +424,16 @@ def detect_persons():
             'thumbnail': f'data:image/jpeg;base64,{thumb_b64}'
         })
 
+    if not results:
+        return jsonify({'error': 'No valid person crop'}), 404
+
     return jsonify({'persons': results})
 
 @app.route('/crop_person', methods=['POST'])
 def crop_person():
     """裁剪视频中选中的人物"""
+    import cv2
+
     data = request.get_json(force=True)
     filename = data.get('filename', '')
     bbox = data.get('bbox', [])  # [x1, y1, x2, y2]
@@ -459,9 +447,17 @@ def crop_person():
     if not os.path.exists(input_path):
         return jsonify({'error': 'File not found'}), 404
 
+    cap = cv2.VideoCapture(input_path)
+    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
+    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 0
+    cap.release()
+    if frame_w <= 0 or frame_h <= 0:
+        return jsonify({'error': 'Cannot read video size'}), 400
+
+    clipped_bbox = _expand_and_clip_bbox(tuple(bbox), frame_w, frame_h)
+
     # 生成输出文件名
-    name, ext = os.path.splitext(filename)
-    out_name = f"{name}_crop{ext}"
+    out_name = _crop_output_filename(filename, clipped_bbox)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], out_name)
 
     # 缓存检查
@@ -475,7 +471,7 @@ def crop_person():
 
     t = threading.Thread(
         target=_run_crop_person,
-        args=(task_id, input_path, output_path, tuple(bbox)),
+        args=(task_id, input_path, output_path, clipped_bbox),
         daemon=True,
     )
     t.start()
@@ -483,46 +479,9 @@ def crop_person():
     return jsonify({'task_id': task_id, 'cached': False})
 
 
-@app.route('/segment', methods=['POST'])
-def segment():
-    data = request.get_json(force=True)
-    filename = data.get('filename', '')
-    bg = data.get('bg_color', 'white')  # 'white' | 'black'
-
-    if not filename or not allowed_file(filename):
-        return jsonify({'error': 'Invalid filename'}), 400
-
-    input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-    if not os.path.exists(input_path):
-        return jsonify({'error': 'File not found'}), 404
-
-    out_name = _output_filename(filename, bg)
-    output_path = os.path.join(app.config['UPLOAD_FOLDER'], out_name)
-
-    # 缓存命中：直接返回已有结果
-    if os.path.exists(output_path):
-        rel = ('/' + output_path.replace(os.sep, '/')).replace('//', '/')
-        return jsonify({'task_id': None, 'cached': True, 'url': rel})
-
-    task_id = str(uuid.uuid4())
-    bg_tuple = (255, 255, 255) if bg == 'white' else (0, 0, 0)
-
-    with _tasks_lock:
-        _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
-
-    t = threading.Thread(
-        target=_run_segmentation,
-        args=(task_id, input_path, output_path, bg_tuple),
-        daemon=True,
-    )
-    t.start()
-
-    return jsonify({'task_id': task_id, 'cached': False})
-
-
-@app.route('/segment/progress/<task_id>')
+@app.route('/crop_person/progress/<task_id>')
 def segment_progress(task_id):
-    """SSE 端点：推送分割进度"""
+    """SSE 端点：推送裁剪进度"""
     def generate():
         while True:
             with _tasks_lock:
@@ -614,6 +573,16 @@ def align():
 
 
 if __name__ == '__main__':
-    print("\n  Dance Trainer Web")
-    print("  http://localhost:5050\n")
-    app.run(host='0.0.0.0', port=5050, debug=True, threaded=True)
+    import os
+    cert = 'localhost+1.pem'
+    key  = 'localhost+1-key.pem'
+    if os.path.exists(cert) and os.path.exists(key):
+        print("\n  Dance Trainer Web  [HTTPS]")
+        print("  https://localhost:5050\n")
+        app.run(host='0.0.0.0', port=5050, debug=True, threaded=True,
+                ssl_context=(cert, key))
+    else:
+        print("\n  Dance Trainer Web  [HTTP]")
+        print("  http://localhost:5050\n")
+        print("  提示：将 localhost+1.pem / localhost+1-key.pem 放在项目根目录可启用 HTTPS")
+        app.run(host='0.0.0.0', port=5050, debug=True, threaded=True)
