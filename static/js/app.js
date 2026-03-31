@@ -7,6 +7,7 @@ const state = {
   muted: { coach: false, user: true },  // coach has sound, user muted by default
   userSource: null,    // 'webcam' | 'file'
   webcamStream: null,
+  webcamPortrait: false,
   trim: {
     coach: { start: 0, end: 1 },  // 0-1 ratio of duration
     user:  { start: 0, end: 1 },
@@ -116,10 +117,12 @@ async function startWebcam(deviceId) {
       state.webcamStream = null;
     }
 
+    const w = state.webcamPortrait ? 720 : 1280;
+    const h = state.webcamPortrait ? 1280 : 720;
     const constraints = {
       video: deviceId
-        ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
-        : { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' }
+        ? { deviceId: { exact: deviceId }, width: { ideal: w }, height: { ideal: h } }
+        : { width: { ideal: w }, height: { ideal: h }, facingMode: 'user' }
     };
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
     state.webcamStream = stream;
@@ -152,6 +155,8 @@ async function populateCameraList(activeDeviceId) {
   ).join('');
   sel.style.display = '';
   if (refreshBtn) refreshBtn.style.display = '';
+  const orientBtn = document.getElementById('webcamOrientBtn');
+  if (orientBtn) orientBtn.style.display = '';
 }
 
 async function refreshCameraList() {
@@ -165,6 +170,16 @@ async function switchCamera(deviceId) {
     state.webcamStream = null;
   }
   await startWebcam(deviceId);
+}
+
+function toggleWebcamOrientation() {
+  state.webcamPortrait = !state.webcamPortrait;
+  const btn = document.getElementById('webcamOrientBtn');
+  if (btn) btn.textContent = state.webcamPortrait ? '竖屏' : '横屏';
+  if (state.webcamStream) {
+    const deviceId = state.webcamStream.getVideoTracks()[0]?.getSettings().deviceId;
+    startWebcam(deviceId);
+  }
 }
 
 function stopWebcam() {

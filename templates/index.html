@@ -90,6 +90,7 @@
       <button class="btn btn-sm" id="srcWebcam" onclick="setUserSource('webcam')" style="margin-left:8px;">Webcam</button>
       <select id="cameraSelect" style="display:none;margin-left:4px;background:#1a1a2e;color:#eee;border:1px solid #444;border-radius:4px;padding:2px 4px;font-size:12px;" onchange="switchCamera(this.value)"></select>
       <button class="btn btn-sm" id="cameraRefresh" style="display:none;margin-left:2px;padding:2px 6px;" onclick="refreshCameraList()" title="刷新摄像头列表">↺</button>
+      <button class="btn btn-sm" id="webcamOrientBtn" style="display:none;margin-left:2px;padding:2px 6px;" onclick="toggleWebcamOrientation()" title="切换竖/横屏">横屏</button>
       <button class="btn btn-sm" id="srcFile" onclick="setUserSource('file')">上传视频</button>
     </div>
     <div class="video-wrap" id="userWrap">
