@@ -9,3 +9,6 @@ __pycache__/
 
 # Videos (large files)
 dance_videos/
+
+
+.venv/

@@ -86,10 +86,12 @@ function loadFile(input, role) {
                                : document.getElementById('userPlaceholder');
   ph.style.display = 'none';
 
-  // Reset seg state and upload to server for segmentation support
+  // Reset crop state and upload to server for crop support
   segState[role] = { filename: null, segUrl: null, origUrl: url, isSegmented: false };
   const btn = document.getElementById(role + 'SegBtn');
-  if (btn) { btn.textContent = '✂ 分割'; btn.classList.remove('segmented'); }
+  if (btn) { btn.textContent = '✂ 裁剪'; btn.classList.remove('segmented'); }
+  const saveBtn = document.getElementById(role + 'SaveBtn');
+  if (saveBtn) saveBtn.style.display = 'none';
   uploadToServer(file, role);
 }
 
@@ -108,6 +110,12 @@ function setUserSource(src) {
 
 async function startWebcam(deviceId) {
   try {
+    // Stop existing stream first
+    if (state.webcamStream) {
+      state.webcamStream.getTracks().forEach(t => t.stop());
+      state.webcamStream = null;
+    }
+
     const constraints = {
       video: deviceId
         ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } }
@@ -121,6 +129,14 @@ async function startWebcam(deviceId) {
     });
     document.getElementById('userPlaceholder').style.display = 'none';
     await populateCameraList(stream.getVideoTracks()[0].getSettings().deviceId);
+
+    // Monitor stream end
+    stream.getTracks().forEach(track => {
+      track.onended = () => {
+        console.log('摄像头断开');
+        state.webcamStream = null;
+      };
+    });
   } catch (e) {
     alert('无法访问摄像头：' + e.message);
   }
@@ -477,6 +493,9 @@ function updateProgress() {
       if (sideFill)  sideFill.style.width = pct + '%';
       if (sideThumb) sideThumb.style.left = pct + '%';
       if (sideTime)  sideTime.textContent = fmtTime(sideV.currentTime) + ' / ' + fmtTime(sideV.duration);
+    } else if (sideV && sideV.srcObject) {
+      // Webcam in side mode
+      if (sideTime) sideTime.textContent = '实时';
     }
     // Update fusion
     if (fusV && fusV.duration) {
@@ -484,6 +503,11 @@ function updateProgress() {
       if (fusFill)  fusFill.style.width = pct + '%';
       if (fusThumb) fusThumb.style.left = pct + '%';
       if (fusTime)  fusTime.textContent = fmtTime(fusV.currentTime) + ' / ' + fmtTime(fusV.duration);
+    } else if (fusV && fusV.srcObject) {
+      // Webcam in fusion mode
+      if (fusTime) fusTime.textContent = '实时';
+      if (fusFill) fusFill.style.width = '0%';
+      if (fusThumb) fusThumb.style.left = '0%';
     }
   });
   requestAnimationFrame(updateProgress);
@@ -552,14 +576,13 @@ document.addEventListener('keydown', e => {
   });
 })();
 /* ================================================================
-   Segmentation
+   Cropping
    ================================================================ */
 const segState = {
   coach: { filename: null, segUrl: null, origUrl: null, isSegmented: false },
   user:  { filename: null, segUrl: null, origUrl: null, isSegmented: false },
 };
 let _segRole = null;
-let _segBg = 'white';
 let _segEventSource = null;
 let _segStartTime = null;
 
@@ -587,8 +610,8 @@ function checkAlignButton() {
   }
 }
 
-/* Open bg color picker popup near the clicked button */
-function openSegPopup(role, btn) {
+/* Detect persons and show selection popup */
+async function openSegPopup(role, btn) {
   const st = segState[role];
   if (!st.filename) {
     alert('请先上传视频文件');
@@ -596,71 +619,95 @@ function openSegPopup(role, btn) {
   }
   _segRole = role;
 
-  // If already segmented, toggle back to original
+  // If already cropped, toggle back to original
   if (st.isSegmented) {
     revertSegment(role);
     return;
   }
 
-  const popup = document.getElementById('segPopup');
-  const rect = btn.getBoundingClientRect();
-  // Position above the button so it doesn't go off-screen
-  popup.style.left = rect.left + 'px';
-  popup.classList.add('active');
-  const popupH = popup.offsetHeight;
-  popup.style.top  = (rect.top - popupH - 6) + 'px';
-  popup.classList.add('active');
+  // Detect persons
+  try {
+    const res = await fetch('/detect_persons', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: st.filename }),
+    });
+    const data = await res.json();
 
-  // Close on outside click
-  setTimeout(() => {
-    document.addEventListener('click', closePopupOutside, { once: true });
-  }, 0);
-}
+    if (data.error) {
+      alert('检测失败：' + data.error);
+      return;
+    }
 
-function closePopupOutside(e) {
-  const popup = document.getElementById('segPopup');
-  if (!popup.contains(e.target)) {
-    popup.classList.remove('active');
+    const persons = data.persons;
+    if (persons.length === 1) {
+      // Single person - start cropping directly
+      startCrop(role, persons[0].bbox);
+    } else {
+      // Multiple persons - show selection popup
+      showPersonSelection(persons);
+    }
+  } catch (e) {
+    alert('检测失败：' + e.message);
   }
 }
 
-function selectBg(color) {
-  _segBg = color;
-  document.getElementById('bgOptWhite').classList.toggle('selected', color === 'white');
-  document.getElementById('bgOptBlack').classList.toggle('selected', color === 'black');
+function showPersonSelection(persons) {
+  const popup = document.getElementById('personPopup');
+  const grid = document.getElementById('personGrid');
+  grid.innerHTML = '';
+
+  persons.forEach(p => {
+    const item = document.createElement('div');
+    item.className = 'person-item';
+    item.innerHTML = `
+      <img src="${p.thumbnail}" alt="Person ${p.id + 1}">
+      <div class="label">人物 ${p.id + 1}</div>
+    `;
+    item.onclick = () => {
+      popup.classList.remove('active');
+      startCrop(_segRole, p.bbox);
+    };
+    grid.appendChild(item);
+  });
+
+  popup.classList.add('active');
 }
 
-function confirmSegment() {
-  document.getElementById('segPopup').classList.remove('active');
-  startSegment(_segRole, _segBg);
+function closePersonPopup() {
+  document.getElementById('personPopup').classList.remove('active');
 }
 
-async function startSegment(role, bgColor) {
+async function startCrop(role, bbox) {
   const st = segState[role];
   if (!st.filename) return;
 
-  // Check cache first
-  const res = await fetch('/segment', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ filename: st.filename, bg_color: bgColor }),
-  });
-  const data = await res.json();
-
-  if (data.error) { alert('分割失败：' + data.error); return; }
-
-  if (data.cached) {
-    // Already processed — apply immediately
-    applySegmentedVideo(role, data.url);
+  let data;
+  try {
+    const res = await fetch('/crop_person', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename: st.filename, bbox }),
+    });
+    data = await res.json();
+  } catch (e) {
+    alert('裁剪失败：' + e.message);
     return;
   }
 
-  // Show overlay and start SSE
+  if (data.error) { alert('裁剪失败：' + data.error); return; }
+
+  if (data.cached) {
+    applyCroppedVideo(role, data.url);
+    return;
+  }
+
   showSegOverlay();
+  document.getElementById('segSubtitle').textContent = '正在追踪并裁剪人物...';
   _segStartTime = Date.now();
 
   if (_segEventSource) _segEventSource.close();
-  _segEventSource = new EventSource('/segment/progress/' + data.task_id);
+  _segEventSource = new EventSource('/crop_person/progress/' + data.task_id);
 
   _segEventSource.onmessage = (e) => {
     const msg = JSON.parse(e.data);
@@ -670,12 +717,12 @@ async function startSegment(role, bgColor) {
       _segEventSource.close();
       _segEventSource = null;
       hideSegOverlay();
-      applySegmentedVideo(role, msg.output);
+      applyCroppedVideo(role, msg.output);
     } else if (msg.status === 'error') {
       _segEventSource.close();
       _segEventSource = null;
       hideSegOverlay();
-      alert('分割出错：' + (msg.error || '未知错误'));
+      alert('裁剪出错：' + (msg.error || '未知错误'));
     }
   };
 
@@ -687,9 +734,8 @@ async function startSegment(role, bgColor) {
   };
 }
 
-function applySegmentedVideo(role, url) {
+function applyCroppedVideo(role, url) {
   const st = segState[role];
-  // Save original src before replacing
   const sideV = document.getElementById(role + 'Video');
   if (!st.origUrl) st.origUrl = sideV.src;
   st.segUrl = url;
@@ -701,17 +747,20 @@ function applySegmentedVideo(role, url) {
     v.src = url;
     v.load();
     v.addEventListener('loadedmetadata', () => {
-      v.currentTime = t;
+      v.currentTime = Math.min(t, Math.max(0, (v.duration || t) - 0.05));
       if (wasPlaying) v.play().catch(() => {});
     }, { once: true });
   });
 
   const btn = document.getElementById(role + 'SegBtn');
   if (btn) {
-    btn.textContent = '✓ 已分割';
+    btn.textContent = '✓ 已裁剪';
     btn.classList.add('segmented');
     btn.title = '点击恢复原始视频';
   }
+
+  const saveBtn = document.getElementById(role + 'SaveBtn');
+  if (saveBtn) saveBtn.style.display = '';
 }
 
 function revertSegment(role) {
@@ -720,18 +769,38 @@ function revertSegment(role) {
   st.isSegmented = false;
 
   allVids(role).forEach(v => {
+    const wasPlaying = !v.paused;
     const t = v.currentTime;
     v.src = st.origUrl;
     v.load();
-    v.addEventListener('loadedmetadata', () => { v.currentTime = t; }, { once: true });
+    v.addEventListener('loadedmetadata', () => {
+      v.currentTime = Math.min(t, Math.max(0, (v.duration || t) - 0.05));
+      if (wasPlaying) v.play().catch(() => {});
+    }, { once: true });
   });
 
   const btn = document.getElementById(role + 'SegBtn');
   if (btn) {
-    btn.textContent = '✂ 分割';
+    btn.textContent = '✂ 裁剪';
     btn.classList.remove('segmented');
     btn.title = '';
   }
+
+  const saveBtn = document.getElementById(role + 'SaveBtn');
+  if (saveBtn) saveBtn.style.display = 'none';
+}
+
+function downloadCroppedVideo(role) {
+  const st = segState[role];
+  if (!st.segUrl) return;
+
+  const link = document.createElement('a');
+  link.href = st.segUrl;
+  const base = st.filename ? st.filename.replace(/\.[^.]+$/, '') : role;
+  link.download = `${base}_crop.mp4`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
 }
 
 function showSegOverlay() {

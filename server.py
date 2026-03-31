@@ -350,9 +350,9 @@ def detect_persons():
     fps = cap.get(cv2.CAP_PROP_FPS) or 30
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
-    # 采样策略：前3秒，每10帧采样一次
-    max_sample_frames = min(int(fps * 3), total_frames)
-    sample_interval = 10
+    # 采样策略：前10秒，每15帧采样一次（约0.5秒间隔）
+    max_sample_frames = min(int(fps * 10), total_frames)
+    sample_interval = 15
 
     net = _load_person_detector()
     all_persons = []  # 收集所有检测到的 bbox
@@ -373,7 +373,7 @@ def detect_persons():
     if not all_persons:
         return jsonify({'error': 'No person detected'}), 404
 
-    # 去重：合并IoU > 0.5 的 bbox
+    # 去重：合并IoU > 0.3 的 bbox（降低阈值以更好地合并同一人物）
     def iou(box1, box2):
         x1 = max(box1[0], box2[0])
         y1 = max(box1[1], box2[1])
@@ -388,7 +388,7 @@ def detect_persons():
     for bbox in all_persons:
         merged = False
         for i, existing in enumerate(unique_persons):
-            if iou(bbox, existing) > 0.5:
+            if iou(bbox, existing) > 0.3:
                 # 合并：取平均
                 unique_persons[i] = [
                     (bbox[0] + existing[0]) / 2,

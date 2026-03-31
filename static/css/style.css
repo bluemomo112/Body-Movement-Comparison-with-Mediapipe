@@ -165,6 +165,8 @@ body {
 .btn-seg { background: #1a3a2e; border-color: #2a6a4e; color: #4ade80; }
 .btn-seg:hover { background: #2a5a3e; }
 .btn-seg.segmented { background: #166534; border-color: #4ade80; color: #4ade80; }
+.btn-save { background: #2a2140; border-color: #5b43a6; color: #c4b5fd; }
+.btn-save:hover { background: #3a2b57; }
 
 /* Full-screen loading overlay */
 .seg-overlay {
@@ -197,28 +199,29 @@ body {
 }
 .seg-overlay .seg-cancel:hover { color: #e0e0e0; border-color: #e0e0e0; }
 
-/* Bg color picker popup */
-.seg-popup {
-  display: none; position: fixed; z-index: 9998;
-  background: #16213e; border: 1px solid #0f3460; border-radius: 8px;
-  padding: 12px 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-  min-width: 180px;
+/* Person selection popup */
+.person-popup {
+  display: none; position: fixed; z-index: 9998; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: #16213e; border: 1px solid #0f3460; border-radius: 12px;
+  padding: 20px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  max-width: 600px; max-height: 80vh; overflow-y: auto;
 }
-.seg-popup.active { display: block; }
-.seg-popup h4 { font-size: 12px; color: #999; margin-bottom: 10px; }
-.seg-popup .bg-opts { display: flex; gap: 8px; margin-bottom: 12px; }
-.seg-popup .bg-opt {
-  flex: 1; padding: 8px; border-radius: 6px; border: 2px solid #333;
-  cursor: pointer; text-align: center; font-size: 12px; color: #ccc;
-  transition: border-color .15s;
+.person-popup.active { display: block; }
+.person-popup h4 { font-size: 16px; color: #e0e0e0; margin-bottom: 16px; text-align: center; }
+.person-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px; margin-bottom: 16px;
 }
-.seg-popup .bg-opt.selected { border-color: #e94560; color: #e94560; }
-.seg-popup .bg-opt .swatch {
-  width: 28px; height: 28px; border-radius: 4px; margin: 0 auto 4px;
-  border: 1px solid #555;
+.person-item {
+  cursor: pointer; border: 2px solid #333; border-radius: 8px;
+  padding: 8px; text-align: center; transition: border-color .2s;
 }
-.seg-popup .btn-confirm {
-  width: 100%; padding: 7px; background: #e94560; border: none;
-  border-radius: 6px; color: #fff; cursor: pointer; font-size: 13px;
+.person-item:hover { border-color: #e94560; }
+.person-item img { width: 100%; height: auto; border-radius: 4px; margin-bottom: 4px; }
+.person-item .label { font-size: 12px; color: #999; }
+.btn-cancel {
+  width: 100%; padding: 8px; background: transparent; border: 1px solid #555;
+  border-radius: 6px; color: #888; cursor: pointer; font-size: 13px;
 }
-.seg-popup .btn-confirm:hover { background: #c73652; }
+.btn-cancel:hover { color: #e0e0e0; border-color: #e0e0e0; }

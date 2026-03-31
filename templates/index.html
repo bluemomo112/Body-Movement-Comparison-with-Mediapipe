@@ -60,7 +60,10 @@
         <button class="btn btn-sm" id="coachMuteBtn" onclick="toggleMute('coach')">🔊</button>
       </div>
       <div class="group">
-        <button class="btn btn-sm btn-seg" id="coachSegBtn" onclick="openSegPopup('coach', this)">✂ 分割</button>
+        <button class="btn btn-sm btn-seg" id="coachSegBtn" onclick="openSegPopup('coach', this)">✂ 裁剪</button>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm btn-save" id="coachSaveBtn" onclick="downloadCroppedVideo('coach')" style="display:none;">保存</button>
       </div>
       <div class="group">
         <label id="coachTime">0:00.00 / 0:00.00</label>
@@ -125,7 +128,10 @@
         <button class="btn btn-sm" id="userMuteBtn" onclick="toggleMute('user')">🔇</button>
       </div>
       <div class="group">
-        <button class="btn btn-sm btn-seg" id="userSegBtn" onclick="openSegPopup('user', this)">✂ 分割</button>
+        <button class="btn btn-sm btn-seg" id="userSegBtn" onclick="openSegPopup('user', this)">✂ 裁剪</button>
+      </div>
+      <div class="group">
+        <button class="btn btn-sm btn-save" id="userSaveBtn" onclick="downloadCroppedVideo('user')" style="display:none;">保存</button>
       </div>
       <div class="group">
         <label id="userTime">0:00.00 / 0:00.00</label>
@@ -243,25 +249,18 @@
   </div>
 </div>
 
-<!-- ── Segmentation Bg Picker Popup ──────────────────────────── -->
-<div class="seg-popup" id="segPopup">
-  <h4>背景颜色</h4>
-  <div class="bg-opts">
-    <div class="bg-opt selected" id="bgOptWhite" onclick="selectBg('white')">
-      <div class="swatch" style="background:#fff;"></div>白色
-    </div>
-    <div class="bg-opt" id="bgOptBlack" onclick="selectBg('black')">
-      <div class="swatch" style="background:#000;"></div>黑色
-    </div>
-  </div>
-  <button class="btn-confirm" onclick="confirmSegment()">开始分割</button>
+<!-- ── Person Selection Popup ──────────────────────────── -->
+<div class="person-popup" id="personPopup">
+  <h4>选择要保留的人物</h4>
+  <div class="person-grid" id="personGrid"></div>
+  <button class="btn-cancel" onclick="closePersonPopup()">取消</button>
 </div>
 
 <!-- ── Segmentation Loading Overlay ──────────────────────────── -->
 <div class="seg-overlay" id="segOverlay">
   <div class="seg-box">
-    <h2>正在分割视频...</h2>
-    <p class="seg-sub" id="segSubtitle">MediaPipe 逐帧处理中，请稍候</p>
+    <h2>正在裁剪视频...</h2>
+    <p class="seg-sub" id="segSubtitle">正在追踪并裁剪人物，请稍候</p>
     <div class="seg-progress-track">
       <div class="seg-progress-fill" id="segProgressFill"></div>
     </div>
