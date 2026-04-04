@@ -45,5 +45,6 @@ export async function cropVideo(
   ]);
 
   const data = await ffmpeg.readFile("output.mp4");
-  return new Blob([data], { type: "video/mp4" });
+  const copy = data instanceof Uint8Array ? new Uint8Array(data) : new TextEncoder().encode(data as string);
+  return new Blob([copy], { type: "video/mp4" });
 }

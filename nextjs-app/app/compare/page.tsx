@@ -54,7 +54,7 @@ export default function ComparePage() {
     };
     window.addEventListener("keydown", handleKeyPress);
     return () => window.removeEventListener("keydown", handleKeyPress);
-  }, [isPlaying]);
+  }, [isPlaying]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen p-8">

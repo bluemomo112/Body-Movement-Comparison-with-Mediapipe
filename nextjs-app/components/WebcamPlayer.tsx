@@ -17,7 +17,7 @@ export default function WebcamPlayer({ onStream, isMirrored }: WebcamPlayerProps
     navigator.mediaDevices.enumerateDevices().then((deviceList) => {
       const cameras = deviceList.filter((d) => d.kind === "videoinput");
       setDevices(cameras);
-      if (cameras.length > 0 && !selectedDevice) {
+      if (cameras.length > 0) {
         setSelectedDevice(cameras[0].deviceId);
       }
     });
@@ -49,7 +49,7 @@ export default function WebcamPlayer({ onStream, isMirrored }: WebcamPlayerProps
         stream.getTracks().forEach((track) => track.stop());
       }
     };
-  }, [selectedDevice]);
+  }, [selectedDevice]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="space-y-2">

@@ -4,7 +4,7 @@ interface PlaybackControlsProps {
   isPlaying: boolean;
   onPlayPause: () => void;
   speed: number;
-  onSpeedChange: (speed: number);
+  onSpeedChange: (speed: number) => void;
   onMirror: () => void;
   isMirrored: boolean;
 }

@@ -24,6 +24,7 @@ export default function PersonSelector({
               onClick={() => onSelect(i)}
               className="cursor-pointer border-2 border-zinc-700 hover:border-white rounded-lg overflow-hidden"
             >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={person.thumbnail} alt={`人物 ${i + 1}`} className="w-full" />
               <p className="text-center py-2 text-sm">人物 {i + 1}</p>
             </div>
