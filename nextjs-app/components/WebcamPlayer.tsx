@@ -1,13 +1,15 @@
 "use client";
 
 import { useRef, useEffect, useState } from "react";
+import PoseOverlay from "@/components/PoseOverlay";
 
 interface WebcamPlayerProps {
   onStream?: (stream: MediaStream) => void;
   isMirrored?: boolean;
+  poseEnabled?: boolean;
 }
 
-export default function WebcamPlayer({ onStream, isMirrored }: WebcamPlayerProps) {
+export default function WebcamPlayer({ onStream, isMirrored, poseEnabled = false }: WebcamPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>("");
@@ -66,14 +68,17 @@ export default function WebcamPlayer({ onStream, isMirrored }: WebcamPlayerProps
           ))}
         </select>
       )}
-      <video
-        ref={videoRef}
-        autoPlay
-        playsInline
-        muted
-        className="w-full rounded-lg"
-        style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
-      />
+      <div className="relative">
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          className="w-full rounded-lg"
+          style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
+        />
+        <PoseOverlay videoRef={videoRef} color="#ff6b6b" enabled={poseEnabled} />
+      </div>
     </div>
   );
 }

@@ -5,6 +5,7 @@ import Link from "next/link";
 import VideoUpload from "@/components/VideoUpload";
 import WebcamPlayer from "@/components/WebcamPlayer";
 import PlaybackControls from "@/components/PlaybackControls";
+import PoseOverlay from "@/components/PoseOverlay";
 
 export default function FollowPage() {
   const [coachVideo, setCoachVideo] = useState<string | null>(null);
@@ -12,6 +13,7 @@ export default function FollowPage() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
   const [isMirrored, setIsMirrored] = useState(false);
+  const [poseEnabled, setPoseEnabled] = useState(false);
 
   const coachRef = useRef<HTMLVideoElement>(null);
 
@@ -43,7 +45,7 @@ export default function FollowPage() {
           <VideoUpload onVideoSelect={handleCoachSelect} label="上传教练视频" />
         ) : (
           <>
-            <div className="flex gap-2">
+            <div className="flex gap-2 flex-wrap">
               <button
                 onClick={() => setMode("side")}
                 className={`px-4 py-2 rounded ${
@@ -59,6 +61,14 @@ export default function FollowPage() {
                 }`}
               >
                 融合
+              </button>
+              <button
+                onClick={() => setPoseEnabled(!poseEnabled)}
+                className={`px-4 py-2 rounded text-sm ${
+                  poseEnabled ? "bg-green-600" : "bg-zinc-800"
+                }`}
+              >
+                骨骼点 {poseEnabled ? "ON" : "OFF"}
               </button>
             </div>
 
@@ -78,16 +88,19 @@ export default function FollowPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <p className="text-sm text-zinc-400 mb-2">教练</p>
-                  <video
-                    ref={coachRef}
-                    src={coachVideo}
-                    className="w-full rounded-lg"
-                    style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
-                  />
+                  <div className="relative">
+                    <video
+                      ref={coachRef}
+                      src={coachVideo}
+                      className="w-full rounded-lg"
+                      style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
+                    />
+                    <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
+                  </div>
                 </div>
                 <div>
                   <p className="text-sm text-zinc-400 mb-2">你</p>
-                  <WebcamPlayer isMirrored={isMirrored} />
+                  <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
                 </div>
               </div>
             ) : (
@@ -98,8 +111,9 @@ export default function FollowPage() {
                   className="w-full rounded-lg"
                   style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
                 />
+                <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
                 <div className="absolute top-0 left-0 w-full opacity-50">
-                  <WebcamPlayer isMirrored={isMirrored} />
+                  <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
                 </div>
               </div>
             )}
