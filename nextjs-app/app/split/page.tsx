@@ -1,48 +1,83 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import Link from "next/link";
-import VideoUpload from "@/components/VideoUpload";
-import { cropVideo } from "@/lib/ffmpeg";
+import PoseOverlay from "@/components/PoseOverlay";
+import PersonSelector from "@/components/PersonSelector";
+import {
+  uploadVideo,
+  detectPersons,
+  cropPerson,
+  watchCropProgress,
+  PersonBbox,
+} from "@/lib/api";
+import { BoundingBox } from "@/lib/videoUtils";
+
+function bboxToBoundingBox(bbox: [number, number, number, number]): BoundingBox {
+  return { x: bbox[0], y: bbox[1], width: bbox[2], height: bbox[3] };
+}
 
 export default function SplitPage() {
-  const [video, setVideo] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState<string | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [filename, setFilename] = useState<string | null>(null);
+  const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [croppedUrl, setCroppedUrl] = useState<string | null>(null);
-  const [cropParams, setCropParams] = useState({ x: 0, y: 0, w: 640, h: 480 });
+  const [personPopup, setPersonPopup] = useState<PersonBbox[] | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  const handleVideoSelect = (file: File) => {
-    setVideo(file);
-    setVideoUrl(URL.createObjectURL(file));
-  };
+  const handleVideoSelect = useCallback(async (file: File) => {
+    setBlobUrl(URL.createObjectURL(file));
+    setCroppedUrl(null);
+    setFilename(null);
+    try {
+      const result = await uploadVideo(file);
+      setFilename(result.filename);
+    } catch (e) {
+      console.warn("Upload failed:", e);
+    }
+  }, []);
 
-  const handleCrop = async () => {
-    if (!video) return;
+  const handleDetect = useCallback(async () => {
+    if (!filename) return;
+    try {
+      const result = await detectPersons(filename);
+      if (result.persons.length === 0) {
+        alert("未检测到人物");
+        return;
+      }
+      if (result.persons.length === 1) {
+        startCrop(result.persons[0].bbox);
+      } else {
+        setPersonPopup(result.persons);
+      }
+    } catch (e) {
+      alert("检测人物失败：" + (e as Error).message);
+    }
+  }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function startCrop(bbox: [number, number, number, number]) {
+    if (!filename) return;
     setIsProcessing(true);
     setProgress(0);
-
     try {
-      const blob = await cropVideo(
-        video,
-        cropParams.x,
-        cropParams.y,
-        cropParams.w,
-        cropParams.h,
-        setProgress
-      );
-      setCroppedUrl(URL.createObjectURL(blob));
-    } catch (error) {
-      console.error("裁剪失败:", error);
-      alert("裁剪失败，请重试");
+      const cropResult = await cropPerson(filename, bbox);
+      if (cropResult.cached && cropResult.url) {
+        setCroppedUrl(cropResult.url);
+        return;
+      }
+      const finalUrl = await watchCropProgress(cropResult.task_id, (evt) => {
+        setProgress(evt.progress);
+      });
+      setCroppedUrl(finalUrl);
+    } catch (e) {
+      alert("裁剪失败：" + (e as Error).message);
     } finally {
       setIsProcessing(false);
     }
-  };
+  }
 
   const handleDownload = () => {
     if (!croppedUrl) return;
@@ -63,57 +98,40 @@ export default function SplitPage() {
       </header>
 
       <main className="max-w-4xl mx-auto space-y-6">
-        {!videoUrl ? (
-          <VideoUpload onVideoSelect={handleVideoSelect} label="上传视频" />
+        {!blobUrl ? (
+          <label className="flex flex-col items-center justify-center border-2 border-dashed border-zinc-700 rounded-lg h-48 cursor-pointer hover:border-zinc-500">
+            <span className="text-zinc-400">点击上传视频</span>
+            <input
+              type="file"
+              accept="video/*"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleVideoSelect(f);
+              }}
+            />
+          </label>
         ) : (
           <>
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <p className="text-sm text-zinc-400 mb-2">原始视频</p>
-                <video
-                  ref={videoRef}
-                  src={videoUrl}
-                  controls
-                  className="w-full rounded-lg"
-                  onLoadedMetadata={(e) => {
-                    const v = e.currentTarget;
-                    setCropParams({
-                      x: 0,
-                      y: 0,
-                      w: v.videoWidth,
-                      h: v.videoHeight,
-                    });
-                  }}
-                />
+                <div className="relative">
+                  <video
+                    ref={videoRef}
+                    src={blobUrl}
+                    controls
+                    className="w-full rounded-lg"
+                  />
+                  <PoseOverlay videoRef={videoRef} color="#00ff88" enabled={false} />
+                </div>
               </div>
-
               {croppedUrl && (
                 <div>
                   <p className="text-sm text-zinc-400 mb-2">裁剪结果</p>
                   <video src={croppedUrl} controls className="w-full rounded-lg" />
                 </div>
               )}
-            </div>
-
-            <div className="bg-zinc-900 p-6 rounded-lg space-y-4">
-              <h3 className="font-medium">裁剪参数</h3>
-              <div className="grid grid-cols-4 gap-4">
-                {(["x", "y", "w", "h"] as const).map((key) => (
-                  <div key={key}>
-                    <label className="text-xs text-zinc-400 block mb-1">
-                      {key === "x" ? "左边距 X" : key === "y" ? "上边距 Y" : key === "w" ? "宽度 W" : "高度 H"}
-                    </label>
-                    <input
-                      type="number"
-                      value={cropParams[key]}
-                      onChange={(e) =>
-                        setCropParams((p) => ({ ...p, [key]: Number(e.target.value) }))
-                      }
-                      className="w-full bg-zinc-800 px-3 py-2 rounded text-sm"
-                    />
-                  </div>
-                ))}
-              </div>
             </div>
 
             {isProcessing && (
@@ -133,11 +151,11 @@ export default function SplitPage() {
 
             <div className="flex gap-4">
               <button
-                onClick={handleCrop}
-                disabled={isProcessing}
+                onClick={handleDetect}
+                disabled={isProcessing || !filename}
                 className="px-6 py-2 bg-white text-black rounded hover:bg-zinc-200 disabled:opacity-50"
               >
-                {isProcessing ? "处理中..." : "开始裁剪"}
+                {isProcessing ? "处理中..." : "检测并裁剪人物"}
               </button>
               {croppedUrl && (
                 <button
@@ -147,10 +165,35 @@ export default function SplitPage() {
                   下载视频
                 </button>
               )}
+              <button
+                onClick={() => {
+                  setBlobUrl(null);
+                  setFilename(null);
+                  setCroppedUrl(null);
+                }}
+                className="px-6 py-2 bg-zinc-800 rounded hover:bg-zinc-700 text-zinc-400"
+              >
+                重新上传
+              </button>
             </div>
           </>
         )}
       </main>
+
+      {personPopup && (
+        <PersonSelector
+          persons={personPopup.map((p) => ({
+            bbox: bboxToBoundingBox(p.bbox),
+            thumbnail: p.thumbnail,
+          }))}
+          onSelect={(i) => {
+            const persons = personPopup;
+            setPersonPopup(null);
+            startCrop(persons[i].bbox);
+          }}
+          onCancel={() => setPersonPopup(null)}
+        />
+      )}
     </div>
   );
 }
