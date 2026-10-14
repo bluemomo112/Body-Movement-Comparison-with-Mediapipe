@@ -1,15 +1,16 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, ReactNode } from "react";
 import PoseOverlay from "@/components/PoseOverlay";
 
 interface WebcamPlayerProps {
   onStream?: (stream: MediaStream) => void;
   isMirrored?: boolean;
   poseEnabled?: boolean;
+  overlay?: ReactNode; // 叠加在摄像头画面上的内容（如教练蒙版）
 }
 
-export default function WebcamPlayer({ onStream, isMirrored, poseEnabled = false }: WebcamPlayerProps) {
+export default function WebcamPlayer({ onStream, isMirrored, poseEnabled = false, overlay }: WebcamPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([]);
   const [selectedDevice, setSelectedDevice] = useState<string>("");
@@ -78,6 +79,7 @@ export default function WebcamPlayer({ onStream, isMirrored, poseEnabled = false
           style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
         />
         <PoseOverlay videoRef={videoRef} color="#ff6b6b" enabled={poseEnabled} />
+        {overlay}
       </div>
     </div>
   );

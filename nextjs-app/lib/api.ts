@@ -92,6 +92,20 @@ export async function cropPerson(
   return res.json();
 }
 
+/** Generates a black/white mask video. roleId=0 means all roles. */
+export async function maskPerson(
+  filename: string,
+  roleId: number
+): Promise<CropPersonResult> {
+  const res = await fetch(`${BASE}/mask_person`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ filename, role_id: roleId }),
+  });
+  if (!res.ok) throw new Error(`Mask person failed: ${res.statusText}`);
+  return res.json();
+}
+
 /**
  * Opens an SSE connection to monitor crop progress.
  * Calls onProgress for each event, resolves with the final video URL.

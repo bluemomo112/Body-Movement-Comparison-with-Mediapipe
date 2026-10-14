@@ -6,10 +6,12 @@ import WebcamPlayer from "@/components/WebcamPlayer";
 import PoseOverlay from "@/components/PoseOverlay";
 import PersonSelector from "@/components/PersonSelector";
 import CoachControls from "@/components/CoachControls";
+import MaskOverlay from "@/components/MaskOverlay";
 import {
   uploadVideo,
   detectPersons,
   cropPerson,
+  maskPerson,
   watchCropProgress,
   DetectPersonsResult,
 } from "@/lib/api";
@@ -31,13 +33,21 @@ export default function FollowPage() {
 
   const [cropLoading, setCropLoading] = useState(false);
   const [cropProgress, setCropProgress] = useState(0);
+  const [taskLabel, setTaskLabel] = useState("正在裁剪...");
   const [personPopup, setPersonPopup] = useState<DetectPersonsResult | null>(null);
+  const [popupPurpose, setPopupPurpose] = useState<"crop" | "mask">("crop");
+
+  // 教练蒙版（全画幅黑底白人），叠加在摄像头画面上对照
+  const [maskUrl, setMaskUrl] = useState<string | null>(null);
+  const [maskOn, setMaskOn] = useState(false);
 
   const coachRef = useRef<HTMLVideoElement>(null);
 
   const handleCoachSelect = useCallback(async (file: File) => {
     const blobUrl = URL.createObjectURL(file);
     setCoach({ blobUrl, filename: null, croppedUrl: null, isCropped: false });
+    setMaskUrl(null);
+    setMaskOn(false);
     try {
       const result = await uploadVideo(file);
       setCoach((prev) => ({ ...prev, filename: result.filename }));
@@ -46,16 +56,19 @@ export default function FollowPage() {
     }
   }, []);
 
-  const handleCropClick = useCallback(async () => {
+  const handleDetect = useCallback(async (purpose: "crop" | "mask") => {
     if (!coach.filename) return;
+    setTaskLabel("正在追踪人物...");
     setCropLoading(true);
     setCropProgress(0);
     try {
       const result = await detectPersons(coach.filename, setCropProgress);
       setCropLoading(false);
       if (result.persons.length === 1) {
-        startCrop(result.persons[0].id);
+        if (purpose === "crop") startCrop(result.persons[0].id);
+        else startMask(result.persons[0].id);
       } else {
+        setPopupPurpose(purpose);
         setPersonPopup(result);
       }
     } catch (e) {
@@ -66,6 +79,7 @@ export default function FollowPage() {
 
   async function startCrop(roleId: number) {
     if (!coach.filename) return;
+    setTaskLabel("正在裁剪...");
     setCropLoading(true);
     setCropProgress(0);
     try {
@@ -85,7 +99,29 @@ export default function FollowPage() {
     }
   }
 
+  async function startMask(roleId: number) {
+    if (!coach.filename) return;
+    setTaskLabel("正在生成蒙版...");
+    setCropLoading(true);
+    setCropProgress(0);
+    try {
+      const result = await maskPerson(coach.filename, roleId);
+      const url = result.cached && result.url
+        ? result.url
+        : await watchCropProgress(result.task_id, (evt) => setCropProgress(evt.progress));
+      setMaskUrl(url);
+      setMaskOn(true);
+    } catch (e) {
+      alert("生成蒙版失败：" + (e as Error).message);
+    } finally {
+      setCropLoading(false);
+    }
+  }
+
   const coachSrc = coach.isCropped ? coach.croppedUrl : coach.blobUrl;
+  const maskOverlay = maskUrl && maskOn ? (
+    <MaskOverlay src={maskUrl} syncRef={coachRef} isMirrored={isMirrored} />
+  ) : undefined;
 
   return (
     <div className="min-h-screen p-8">
@@ -146,7 +182,7 @@ export default function FollowPage() {
 
               {!coach.isCropped ? (
                 <button
-                  onClick={handleCropClick}
+                  onClick={() => handleDetect("crop")}
                   disabled={cropLoading || !coach.filename}
                   className="px-4 py-2 rounded text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
                 >
@@ -160,13 +196,38 @@ export default function FollowPage() {
                   ✓ 已裁剪 (恢复)
                 </button>
               )}
+
+              <button
+                onClick={() => handleDetect("mask")}
+                disabled={cropLoading || !coach.filename}
+                className="px-4 py-2 rounded text-sm bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50"
+              >
+                ◐ {maskUrl ? "重新生成蒙版" : "生成蒙版"}
+              </button>
+              {maskUrl && (
+                <>
+                  <button
+                    onClick={() => setMaskOn(!maskOn)}
+                    className={`px-4 py-2 rounded text-sm ${maskOn ? "bg-purple-600" : "bg-zinc-800"}`}
+                  >
+                    蒙版叠加 {maskOn ? "ON" : "OFF"}
+                  </button>
+                  <a
+                    href={maskUrl}
+                    download
+                    className="px-4 py-2 rounded text-sm bg-zinc-800 hover:bg-zinc-700"
+                  >
+                    下载蒙版
+                  </a>
+                </>
+              )}
             </div>
 
             {/* Crop progress */}
             {cropLoading && (
               <div className="bg-zinc-900 p-4 rounded-lg">
                 <div className="flex justify-between mb-2">
-                  <span className="text-sm">正在裁剪...</span>
+                  <span className="text-sm">{taskLabel}</span>
                   <span className="text-sm">{cropProgress}%</span>
                 </div>
                 <div className="h-2 bg-zinc-800 rounded">
@@ -192,7 +253,7 @@ export default function FollowPage() {
                   <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
                   {mode === "fusion" && (
                     <div className="absolute top-0 left-0 w-full opacity-50">
-                      <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
+                      <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} overlay={maskOverlay} />
                     </div>
                   )}
                 </div>
@@ -201,7 +262,7 @@ export default function FollowPage() {
               {mode === "side" && (
                 <div>
                   <p className="text-sm text-zinc-400 mb-2">你</p>
-                  <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
+                  <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} overlay={maskOverlay} />
                 </div>
               )}
             </div>
@@ -214,9 +275,12 @@ export default function FollowPage() {
           persons={personPopup.persons}
           tracks={personPopup.tracks}
           videoSrc={coach.blobUrl}
+          title={popupPurpose === "crop" ? "选择要裁剪的角色" : "选择要生成蒙版的角色"}
+          allowAll={popupPurpose === "mask"}
           onSelect={(roleId) => {
             setPersonPopup(null);
-            startCrop(roleId);
+            if (popupPurpose === "crop") startCrop(roleId);
+            else startMask(roleId);
           }}
           onCancel={() => setPersonPopup(null)}
         />

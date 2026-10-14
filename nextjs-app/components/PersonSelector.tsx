@@ -11,6 +11,8 @@ interface PersonSelectorProps {
   persons: PersonBbox[];
   tracks: TrackData;
   videoSrc: string;
+  title?: string;
+  allowAll?: boolean; // 显示「全部角色」选项，选中时 onSelect(0)
   onSelect: (roleId: number) => void;
   onCancel: () => void;
 }
@@ -19,6 +21,8 @@ export default function PersonSelector({
   persons,
   tracks,
   videoSrc,
+  title = "选择要裁剪的角色",
+  allowAll = false,
   onSelect,
   onCancel,
 }: PersonSelectorProps) {
@@ -85,7 +89,7 @@ export default function PersonSelector({
   return (
     <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
       <div className="bg-zinc-900 rounded-lg p-6 max-w-4xl w-full max-h-[90vh] overflow-auto">
-        <h2 className="text-xl font-bold mb-1">选择要裁剪的角色</h2>
+        <h2 className="text-xl font-bold mb-1">{title}</h2>
         <p className="text-sm text-zinc-400 mb-4">播放视频确认每个角色全程追踪正确，点击框或下方卡片选择</p>
         <div className="relative mb-4" onClickCapture={handleClick}>
           <video
@@ -117,6 +121,14 @@ export default function PersonSelector({
               </p>
             </div>
           ))}
+          {allowAll && (
+            <div
+              onClick={() => onSelect(0)}
+              className="cursor-pointer border-2 border-white rounded-lg flex items-center justify-center hover:opacity-80 min-h-24"
+            >
+              <p className="text-center text-sm">全部角色</p>
+            </div>
+          )}
         </div>
         <button
           onClick={onCancel}
