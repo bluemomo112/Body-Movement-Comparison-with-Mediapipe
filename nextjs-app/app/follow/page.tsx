@@ -8,6 +8,7 @@ import PersonSelector from "@/components/PersonSelector";
 import CoachControls from "@/components/CoachControls";
 import MaskOverlay, { MaskMode } from "@/components/MaskOverlay";
 import Resizable from "@/components/Resizable";
+import DragBox from "@/components/DragBox";
 import {
   uploadVideo,
   detectPersons,
@@ -44,6 +45,7 @@ export default function FollowPage() {
   const [maskStrength, setMaskStrength] = useState(0.8);
 
   const coachRef = useRef<HTMLVideoElement>(null);
+  const [coachAspect, setCoachAspect] = useState(16 / 9); // 舞台比例 = 教练视频比例
 
   const handleCoachSelect = useCallback(async (file: File) => {
     const blobUrl = URL.createObjectURL(file);
@@ -259,22 +261,30 @@ export default function FollowPage() {
             )}
 
             {/* Video area：教练视频与控件条始终在同一位置，切换模式不重建（保留进度和打点）；
-                每个画面右下角可拖动等比缩放 */}
+                每个画面右下角可拖动等比缩放。融合模式下教练和摄像头是舞台上的独立图层，可分别移动/缩放 */}
             <div className={mode === "side" ? "flex flex-wrap gap-4 items-start" : ""}>
               <Resizable defaultWidth={mode === "side" ? "calc(50% - 8px)" : "100%"}>
                 {mode === "side" && <p className="text-sm text-zinc-400 mb-2">教练</p>}
-                <div className="relative">
-                  <video
-                    ref={coachRef}
-                    src={coachSrc ?? undefined}
-                    className="w-full rounded-lg"
-                    style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
-                  />
-                  <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
-                  {mode === "fusion" && (
-                    <div className="absolute top-0 left-0 w-full opacity-50">
-                      <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} overlay={maskOverlay} />
+                <div className="relative overflow-hidden rounded-lg bg-black" style={{ aspectRatio: coachAspect }}>
+                  <DragBox enabled={mode === "fusion"} defaultPlacement={{ x: 0, y: 0, w: 100 }} title="教练：拖动移动，右下角或滚轮等比缩放，双击恢复">
+                    <div className="relative">
+                      <video
+                        ref={coachRef}
+                        src={coachSrc ?? undefined}
+                        onLoadedMetadata={(e) =>
+                          setCoachAspect(e.currentTarget.videoWidth / e.currentTarget.videoHeight)
+                        }
+                        className="block w-full rounded-lg"
+                        style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
+                      />
+                      <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
                     </div>
+                  </DragBox>
+                  {mode === "fusion" && (
+                    // 默认按 4:3 摄像头铺满舞台高度并居中，双击图层恢复
+                    <DragBox enabled defaultPlacement={{ x: 12.5, y: 0, w: 75 }} className="opacity-50" title="你：拖动移动，右下角或滚轮等比缩放，双击恢复">
+                      <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} overlay={maskOverlay} />
+                    </DragBox>
                   )}
                 </div>
                 <CoachControls videoRef={coachRef} bindKey={coachSrc} />
