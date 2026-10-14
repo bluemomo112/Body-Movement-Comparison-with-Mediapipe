@@ -360,6 +360,73 @@ def crop_person():
     return jsonify({'task_id': task_id, 'cached': False})
 
 
+def _run_mask(task_id, input_path, output_path, role_id):
+    """后台线程：生成角色蒙版视频（role_id=0 表示全部角色）"""
+    import subprocess
+    from person_tracker import track_video, render_mask
+
+    def update(progress, status, output=None, error=None):
+        with _tasks_lock:
+            _tasks[task_id] = {'progress': progress, 'status': status,
+                               'output': output, 'error': error}
+
+    tmp_path = output_path + '.tmp.mp4'
+    try:
+        tracks = track_video(input_path, on_progress=lambda p: update(int(p * 0.3), 'processing'))
+        role_ids = [r['id'] for r in tracks['roles']] if role_id == 0 else [role_id]
+        if not any(r['id'] in role_ids for r in tracks['roles']):
+            update(0, 'error', error=f'角色 {role_id} 不存在')
+            return
+        render_mask(input_path, tmp_path, tracks, role_ids,
+                    on_progress=lambda p: update(30 + int(p * 0.65), 'processing'))
+        update(96, 'processing')
+        subprocess.run([
+            'ffmpeg', '-y', '-i', tmp_path, '-c:v', 'libx264', '-preset', 'fast',
+            '-crf', '23', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', output_path,
+        ], check=True, capture_output=True)
+        rel = '/' + output_path.replace(os.sep, '/')
+        print(f"[mask] _run_mask: done output={rel}")
+        update(100, 'done', output=rel)
+    except Exception as e:
+        print(f"[mask] _run_mask: error={e}")
+        update(0, 'error', error=str(e))
+    finally:
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
+@app.route('/mask_person', methods=['POST'])
+def mask_person():
+    """生成黑底白人蒙版视频。role_id=0 表示全部角色"""
+    data = request.get_json(force=True)
+    filename = data.get('filename', '')
+    role_id = data.get('role_id')
+
+    if not filename or not allowed_file(filename):
+        return jsonify({'error': 'Invalid filename'}), 400
+    if not isinstance(role_id, int) or role_id < 0:
+        return jsonify({'error': 'Invalid role_id'}), 400
+
+    input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    if not os.path.exists(input_path):
+        return jsonify({'error': 'File not found'}), 404
+
+    name, _ = os.path.splitext(filename)
+    tag = 'all' if role_id == 0 else f'role{role_id}'
+    output_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{name}_mask_{tag}.mp4")
+
+    if os.path.exists(output_path):
+        return jsonify({'task_id': None, 'cached': True, 'url': '/' + output_path.replace(os.sep, '/')})
+
+    task_id = str(uuid.uuid4())
+    with _tasks_lock:
+        _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
+    print(f"[mask] mask_person: filename={filename}, role_id={role_id}, task_id={task_id}")
+    threading.Thread(target=_run_mask, args=(task_id, input_path, output_path, role_id),
+                     daemon=True).start()
+    return jsonify({'task_id': task_id, 'cached': False})
+
+
 @app.route('/crop_person/progress/<task_id>')
 def segment_progress(task_id):
     """SSE 端点：推送裁剪进度"""

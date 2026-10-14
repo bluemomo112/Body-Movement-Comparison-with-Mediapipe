@@ -10,8 +10,10 @@ import numpy as np
 
 MODEL_PATH = os.path.join('models', 'yolo11m.pt')
 TRACKER_CFG = os.path.join('models', 'botsort_dance.yaml')
+SEG_MODEL_PATH = os.path.join('models', 'yolo11x-seg.pt')
 
 _model = None
+_seg_model = None
 
 
 def _get_model():
@@ -20,6 +22,14 @@ def _get_model():
         from ultralytics import YOLO
         _model = YOLO(MODEL_PATH)
     return _model
+
+
+def _get_seg_model():
+    global _seg_model
+    if _seg_model is None:
+        from ultralytics import YOLO
+        _seg_model = YOLO(SEG_MODEL_PATH)
+    return _seg_model
 
 
 def _device():
@@ -143,3 +153,54 @@ def dense_boxes(role, frame_count):
     arr = np.array(role['boxes'], dtype=float)
     frames = np.arange(frame_count)
     return np.stack([np.interp(frames, arr[:, 0], arr[:, i]) for i in range(1, 5)], axis=1)
+
+
+def _box_iou(a, b):
+    ix = max(0.0, min(a[2], b[2]) - max(a[0], b[0])) * max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - ix
+    return ix / union if union > 0 else 0.0
+
+
+def render_mask(input_path, output_path, tracks, role_ids, on_progress=None):
+    """
+    生成黑底白人的全画幅蒙版视频（无音频）。
+    每帧用 YOLO 实例分割得到所有人的 mask，按追踪框 IoU 选出 role_ids 对应的 mask 合并。
+    """
+    import cv2
+
+    roles = {r['id']: {b[0]: b[1:] for b in r['boxes']} for r in tracks['roles'] if r['id'] in role_ids}
+    print(f"[mask] render_mask: input={input_path}, role_ids={sorted(roles)}")
+
+    cap = cv2.VideoCapture(input_path)
+    total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    writer = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), fps, (w, h), isColor=False)
+    model, device = _get_seg_model(), _device()
+
+    frame_idx, stats = 0, {'masked': 0, 'missed': 0}
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        mask = np.zeros((h, w), np.uint8)
+        targets = [rb[frame_idx] for rb in roles.values() if frame_idx in rb]
+        if targets:
+            r = model.predict(frame, classes=[0], conf=0.25, retina_masks=True,
+                              verbose=False, device=device)[0]
+            det_boxes = r.boxes.xyxy.cpu().numpy() if r.masks is not None else []
+            for box in targets:
+                ious = [_box_iou(box, d) for d in det_boxes]
+                if ious and max(ious) > 0.5:
+                    m = r.masks.data[int(np.argmax(ious))].cpu().numpy()
+                    mask[m > 0.5] = 255
+                    stats['masked'] += 1
+                else:
+                    stats['missed'] += 1
+        writer.write(mask)
+        frame_idx += 1
+        if on_progress and frame_idx % 10 == 0:
+            on_progress(min(99, int(frame_idx / total * 100)))
+    cap.release()
+    writer.release()
+    print(f"[mask] render_mask: frames={frame_idx}, stats={stats}")
