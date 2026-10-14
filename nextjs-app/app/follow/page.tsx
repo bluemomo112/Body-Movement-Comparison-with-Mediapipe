@@ -10,13 +10,8 @@ import {
   detectPersons,
   cropPerson,
   watchCropProgress,
-  PersonBbox,
+  DetectPersonsResult,
 } from "@/lib/api";
-import { BoundingBox } from "@/lib/videoUtils";
-
-function bboxToBoundingBox(bbox: [number, number, number, number]): BoundingBox {
-  return { x: bbox[0], y: bbox[1], width: bbox[2], height: bbox[3] };
-}
 
 interface CoachState {
   blobUrl: string | null;
@@ -37,7 +32,7 @@ export default function FollowPage() {
 
   const [cropLoading, setCropLoading] = useState(false);
   const [cropProgress, setCropProgress] = useState(0);
-  const [personPopup, setPersonPopup] = useState<PersonBbox[] | null>(null);
+  const [personPopup, setPersonPopup] = useState<DetectPersonsResult | null>(null);
 
   const coachRef = useRef<HTMLVideoElement>(null);
 
@@ -54,24 +49,28 @@ export default function FollowPage() {
 
   const handleCropClick = useCallback(async () => {
     if (!coach.filename) return;
+    setCropLoading(true);
+    setCropProgress(0);
     try {
-      const result = await detectPersons(coach.filename);
+      const result = await detectPersons(coach.filename, setCropProgress);
+      setCropLoading(false);
       if (result.persons.length === 1) {
-        startCrop(result.persons[0].bbox);
+        startCrop(result.persons[0].id);
       } else {
-        setPersonPopup(result.persons);
+        setPersonPopup(result);
       }
     } catch (e) {
+      setCropLoading(false);
       alert("检测人物失败：" + (e as Error).message);
     }
   }, [coach.filename]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startCrop(bbox: [number, number, number, number]) {
+  async function startCrop(roleId: number) {
     if (!coach.filename) return;
     setCropLoading(true);
     setCropProgress(0);
     try {
-      const cropResult = await cropPerson(coach.filename, bbox);
+      const cropResult = await cropPerson(coach.filename, roleId);
       if (cropResult.cached && cropResult.url) {
         setCoach((prev) => ({ ...prev, croppedUrl: cropResult.url!, isCropped: true }));
         return;
@@ -247,16 +246,14 @@ export default function FollowPage() {
         )}
       </main>
 
-      {personPopup && (
+      {personPopup && coach.blobUrl && (
         <PersonSelector
-          persons={personPopup.map((p) => ({
-            bbox: bboxToBoundingBox(p.bbox),
-            thumbnail: p.thumbnail,
-          }))}
-          onSelect={(i) => {
-            const persons = personPopup;
+          persons={personPopup.persons}
+          tracks={personPopup.tracks}
+          videoSrc={coach.blobUrl}
+          onSelect={(roleId) => {
             setPersonPopup(null);
-            startCrop(persons[i].bbox);
+            startCrop(roleId);
           }}
           onCancel={() => setPersonPopup(null)}
         />

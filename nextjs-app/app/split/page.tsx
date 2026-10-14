@@ -9,13 +9,8 @@ import {
   detectPersons,
   cropPerson,
   watchCropProgress,
-  PersonBbox,
+  DetectPersonsResult,
 } from "@/lib/api";
-import { BoundingBox } from "@/lib/videoUtils";
-
-function bboxToBoundingBox(bbox: [number, number, number, number]): BoundingBox {
-  return { x: bbox[0], y: bbox[1], width: bbox[2], height: bbox[3] };
-}
 
 export default function SplitPage() {
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -24,7 +19,7 @@ export default function SplitPage() {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [personPopup, setPersonPopup] = useState<PersonBbox[] | null>(null);
+  const [personPopup, setPersonPopup] = useState<DetectPersonsResult | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -42,28 +37,32 @@ export default function SplitPage() {
 
   const handleDetect = useCallback(async () => {
     if (!filename) return;
+    setIsProcessing(true);
+    setProgress(0);
     try {
-      const result = await detectPersons(filename);
+      const result = await detectPersons(filename, setProgress);
+      setIsProcessing(false);
       if (result.persons.length === 0) {
         alert("未检测到人物");
         return;
       }
       if (result.persons.length === 1) {
-        startCrop(result.persons[0].bbox);
+        startCrop(result.persons[0].id);
       } else {
-        setPersonPopup(result.persons);
+        setPersonPopup(result);
       }
     } catch (e) {
+      setIsProcessing(false);
       alert("检测人物失败：" + (e as Error).message);
     }
   }, [filename]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  async function startCrop(bbox: [number, number, number, number]) {
+  async function startCrop(roleId: number) {
     if (!filename) return;
     setIsProcessing(true);
     setProgress(0);
     try {
-      const cropResult = await cropPerson(filename, bbox);
+      const cropResult = await cropPerson(filename, roleId);
       if (cropResult.cached && cropResult.url) {
         setCroppedUrl(cropResult.url);
         return;
@@ -180,16 +179,14 @@ export default function SplitPage() {
         )}
       </main>
 
-      {personPopup && (
+      {personPopup && blobUrl && (
         <PersonSelector
-          persons={personPopup.map((p) => ({
-            bbox: bboxToBoundingBox(p.bbox),
-            thumbnail: p.thumbnail,
-          }))}
-          onSelect={(i) => {
-            const persons = personPopup;
+          persons={personPopup.persons}
+          tracks={personPopup.tracks}
+          videoSrc={blobUrl}
+          onSelect={(roleId) => {
             setPersonPopup(null);
-            startCrop(persons[i].bbox);
+            startCrop(roleId);
           }}
           onCancel={() => setPersonPopup(null)}
         />

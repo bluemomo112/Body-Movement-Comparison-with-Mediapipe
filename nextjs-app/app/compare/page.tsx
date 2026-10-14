@@ -10,13 +10,8 @@ import {
   cropPerson,
   watchCropProgress,
   smartAlign,
-  PersonBbox,
+  DetectPersonsResult,
 } from "@/lib/api";
-import { BoundingBox } from "@/lib/videoUtils";
-
-function bboxToBoundingBox(bbox: [number, number, number, number]): BoundingBox {
-  return { x: bbox[0], y: bbox[1], width: bbox[2], height: bbox[3] };
-}
 
 /* ── helpers ── */
 function fmtTime(s: number) {
@@ -298,7 +293,7 @@ export default function ComparePage() {
   /* person selector popup */
   const [personPopup, setPersonPopup] = useState<{
     role: "coach" | "user";
-    persons: PersonBbox[];
+    result: DetectPersonsResult;
   } | null>(null);
 
   /* align */
@@ -333,14 +328,20 @@ export default function ComparePage() {
       const vs = role === "coach" ? coachVS : userVS;
       if (!vs.filename) return;
 
+      setCropLoading((p) => ({ ...p, [role]: true }));
+      setCropProgress((p) => ({ ...p, [role]: 0 }));
       try {
-        const result = await detectPersons(vs.filename);
+        const result = await detectPersons(vs.filename, (progress) =>
+          setCropProgress((p) => ({ ...p, [role]: progress }))
+        );
+        setCropLoading((p) => ({ ...p, [role]: false }));
         if (result.persons.length === 1) {
-          startCrop(role, result.persons[0].bbox);
+          startCrop(role, result.persons[0].id);
         } else {
-          setPersonPopup({ role, persons: result.persons });
+          setPersonPopup({ role, result });
         }
       } catch (e) {
+        setCropLoading((p) => ({ ...p, [role]: false }));
         alert("检测人物失败：" + (e as Error).message);
       }
     },
@@ -349,7 +350,7 @@ export default function ComparePage() {
 
   async function startCrop(
     role: "coach" | "user",
-    bbox: [number, number, number, number]
+    roleId: number
   ) {
     const vs = role === "coach" ? coachVS : userVS;
     if (!vs.filename) return;
@@ -358,7 +359,7 @@ export default function ComparePage() {
     setCropProgress((p) => ({ ...p, [role]: 0 }));
 
     try {
-      const cropResult = await cropPerson(vs.filename, bbox);
+      const cropResult = await cropPerson(vs.filename, roleId);
       if (cropResult.cached && cropResult.url) {
         applyCrop(role, cropResult.url);
         return;
@@ -623,14 +624,13 @@ export default function ComparePage() {
       {/* Person selector popup */}
       {personPopup && (
         <PersonSelector
-          persons={personPopup.persons.map((p) => ({
-            bbox: bboxToBoundingBox(p.bbox),
-            thumbnail: p.thumbnail,
-          }))}
-          onSelect={(i) => {
-            const { role, persons } = personPopup;
+          persons={personPopup.result.persons}
+          tracks={personPopup.result.tracks}
+          videoSrc={(personPopup.role === "coach" ? coachVS : userVS).blobUrl!}
+          onSelect={(roleId) => {
+            const { role } = personPopup;
             setPersonPopup(null);
-            startCrop(role, persons[i].bbox);
+            startCrop(role, roleId);
           }}
           onCancel={() => setPersonPopup(null)}
         />
