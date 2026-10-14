@@ -5,6 +5,7 @@ import Link from "next/link";
 import WebcamPlayer from "@/components/WebcamPlayer";
 import PoseOverlay from "@/components/PoseOverlay";
 import PersonSelector from "@/components/PersonSelector";
+import CoachControls from "@/components/CoachControls";
 import {
   uploadVideo,
   detectPersons,
@@ -25,8 +26,6 @@ export default function FollowPage() {
     blobUrl: null, filename: null, croppedUrl: null, isCropped: false,
   });
   const [mode, setMode] = useState<"side" | "fusion">("side");
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
   const [isMirrored, setIsMirrored] = useState(false);
   const [poseEnabled, setPoseEnabled] = useState(false);
 
@@ -86,16 +85,6 @@ export default function FollowPage() {
     }
   }
 
-  const handlePlayPause = () => {
-    if (!coachRef.current) return;
-    if (isPlaying) {
-      coachRef.current.pause();
-    } else {
-      coachRef.current.play().catch(() => {});
-    }
-    setIsPlaying(!isPlaying);
-  };
-
   const coachSrc = coach.isCropped ? coach.croppedUrl : coach.blobUrl;
 
   return (
@@ -140,25 +129,6 @@ export default function FollowPage() {
 
               <div className="w-px h-6 bg-zinc-700" />
 
-              <button
-                onClick={handlePlayPause}
-                className="px-4 py-2 bg-white text-black rounded hover:bg-zinc-200"
-              >
-                {isPlaying ? "暂停" : "播放"}
-              </button>
-              <select
-                value={speed}
-                onChange={(e) => {
-                  const s = Number(e.target.value);
-                  setSpeed(s);
-                  if (coachRef.current) coachRef.current.playbackRate = s;
-                }}
-                className="bg-zinc-800 px-2 py-1 rounded text-sm"
-              >
-                {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 2].map((s) => (
-                  <option key={s} value={s}>{s}x</option>
-                ))}
-              </select>
               <button
                 onClick={() => setIsMirrored(!isMirrored)}
                 className={`px-4 py-2 rounded text-sm ${isMirrored ? "bg-blue-600" : "bg-zinc-800"}`}
@@ -208,40 +178,33 @@ export default function FollowPage() {
               </div>
             )}
 
-            {/* Video area */}
-            {mode === "side" ? (
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-zinc-400 mb-2">教练</p>
-                  <div className="relative">
-                    <video
-                      ref={coachRef}
-                      src={coachSrc ?? undefined}
-                      className="w-full rounded-lg"
-                      style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
-                    />
-                    <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
-                  </div>
+            {/* Video area：教练视频与控件条始终在同一位置，切换模式不重建（保留进度和打点） */}
+            <div className={mode === "side" ? "grid grid-cols-2 gap-4" : ""}>
+              <div>
+                {mode === "side" && <p className="text-sm text-zinc-400 mb-2">教练</p>}
+                <div className="relative">
+                  <video
+                    ref={coachRef}
+                    src={coachSrc ?? undefined}
+                    className="w-full rounded-lg"
+                    style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
+                  />
+                  <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
+                  {mode === "fusion" && (
+                    <div className="absolute top-0 left-0 w-full opacity-50">
+                      <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
+                    </div>
+                  )}
                 </div>
+                <CoachControls videoRef={coachRef} bindKey={coachSrc} />
+              </div>
+              {mode === "side" && (
                 <div>
                   <p className="text-sm text-zinc-400 mb-2">你</p>
                   <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
                 </div>
-              </div>
-            ) : (
-              <div className="relative">
-                <video
-                  ref={coachRef}
-                  src={coachSrc ?? undefined}
-                  className="w-full rounded-lg"
-                  style={{ transform: isMirrored ? "scaleX(-1)" : "none" }}
-                />
-                <PoseOverlay videoRef={coachRef} color="#00ff88" enabled={poseEnabled} />
-                <div className="absolute top-0 left-0 w-full opacity-50">
-                  <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} />
-                </div>
-              </div>
-            )}
+              )}
+            </div>
           </>
         )}
       </main>
