@@ -41,6 +41,7 @@ export default function FollowPage() {
   // 教练蒙版（全画幅黑底白人），叠加在摄像头画面上对照
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
   const [maskMode, setMaskMode] = useState<MaskMode | "off">("off");
+  const [maskStrength, setMaskStrength] = useState(0.8);
 
   const coachRef = useRef<HTMLVideoElement>(null);
 
@@ -121,7 +122,7 @@ export default function FollowPage() {
 
   const coachSrc = coach.isCropped ? coach.croppedUrl : coach.blobUrl;
   const maskOverlay = maskUrl && maskMode !== "off" ? (
-    <MaskOverlay src={maskUrl} syncRef={coachRef} mode={maskMode} isMirrored={isMirrored} />
+    <MaskOverlay src={maskUrl} syncRef={coachRef} mode={maskMode} strength={maskStrength} isMirrored={isMirrored} />
   ) : undefined;
 
   return (
@@ -215,6 +216,21 @@ export default function FollowPage() {
                   >
                     蒙版：{{ cutout: "遮背景", silhouette: "剪影", off: "关" }[maskMode]}
                   </button>
+                  {maskMode !== "off" && (
+                    <label className="flex items-center gap-2 text-sm text-zinc-400">
+                      {maskMode === "cutout" ? "背景遮挡" : "剪影浓度"}
+                      <input
+                        type="range"
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={maskStrength}
+                        onChange={(e) => setMaskStrength(Number(e.target.value))}
+                        className="w-24 accent-purple-500"
+                      />
+                      <span className="tabular-nums w-9">{Math.round(maskStrength * 100)}%</span>
+                    </label>
+                  )}
                   <a
                     href={maskUrl}
                     download

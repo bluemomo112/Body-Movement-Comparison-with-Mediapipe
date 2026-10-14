@@ -7,7 +7,8 @@ export type MaskMode = "cutout" | "silhouette";
 interface MaskOverlayProps {
   src: string;
   syncRef: RefObject<HTMLVideoElement | null>; // 跟随的教练视频
-  mode: MaskMode; // cutout: 只有蒙版处透出画面，其余全黑；silhouette: 半透明白色剪影
+  mode: MaskMode; // cutout: 只有蒙版处透出画面，其余压暗；silhouette: 半透明白色剪影
+  strength: number; // 0-1。cutout: 背景压暗程度（1 为全黑）；silhouette: 剪影不透明度
   isMirrored?: boolean;
 }
 
@@ -22,7 +23,7 @@ interface Placement {
  * 教练蒙版叠加层，与教练视频同步时间/速度/播放状态。
  * 拖动蒙版移动位置，拖右下角等比缩放，双击恢复默认位置。
  */
-export default function MaskOverlay({ src, syncRef, mode, isMirrored }: MaskOverlayProps) {
+export default function MaskOverlay({ src, syncRef, mode, strength, isMirrored }: MaskOverlayProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const maskRef = useRef<HTMLVideoElement>(null);
   const [placement, setPlacement] = useState<Placement | null>(null);
@@ -85,13 +86,15 @@ export default function MaskOverlay({ src, syncRef, mode, isMirrored }: MaskOver
   };
 
   const cutout = mode === "cutout";
+  const bgLevel = Math.round((1 - strength) * 255); // cutout 背景灰度，multiply 后即压暗比例
 
   return (
-    // cutout：黑底 + 白色蒙版整体以 multiply 叠到摄像头上，白处透出、黑处遮住
+    // cutout：灰底 + 白色蒙版（lighten 把蒙版黑色抬到底色）整体 multiply 叠到摄像头上，
+    // 白处原样透出，其余按底色压暗
     <div
       ref={containerRef}
       className="absolute inset-0 overflow-hidden rounded-lg pointer-events-none"
-      style={cutout ? { background: "black", mixBlendMode: "multiply" } : undefined}
+      style={cutout ? { background: `rgb(${bgLevel},${bgLevel},${bgLevel})`, mixBlendMode: "multiply" } : undefined}
     >
       <div
         className="group absolute pointer-events-auto cursor-move"
@@ -109,7 +112,7 @@ export default function MaskOverlay({ src, syncRef, mode, isMirrored }: MaskOver
           className="block w-full"
           style={{
             transform: isMirrored ? "scaleX(-1)" : "none",
-            ...(cutout ? {} : { mixBlendMode: "screen", opacity: 0.5 }),
+            ...(cutout ? { mixBlendMode: "lighten" } : { mixBlendMode: "screen", opacity: strength }),
           }}
         />
         <div className="absolute inset-0 border border-dashed border-purple-400 opacity-0 group-hover:opacity-100" />
