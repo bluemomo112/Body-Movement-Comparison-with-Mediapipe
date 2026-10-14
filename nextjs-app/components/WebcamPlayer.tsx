@@ -17,13 +17,19 @@ export default function WebcamPlayer({ onStream, isMirrored, poseEnabled = false
   const [stream, setStream] = useState<MediaStream | null>(null);
 
   useEffect(() => {
-    navigator.mediaDevices.enumerateDevices().then((deviceList) => {
-      const cameras = deviceList.filter((d) => d.kind === "videoinput");
-      setDevices(cameras);
-      if (cameras.length > 0) {
-        setSelectedDevice(cameras[0].deviceId);
-      }
-    });
+    // 手机（连续互通相机）等可能在页面打开后才接入，设备变化时重新枚举
+    const refresh = () =>
+      navigator.mediaDevices.enumerateDevices().then((deviceList) => {
+        const cameras = deviceList.filter((d) => d.kind === "videoinput");
+        console.log("[webcam] cameras:", cameras.map((c) => c.label));
+        setDevices(cameras);
+        setSelectedDevice((cur) =>
+          cameras.some((c) => c.deviceId === cur) ? cur : cameras[0]?.deviceId ?? ""
+        );
+      });
+    refresh();
+    navigator.mediaDevices.addEventListener("devicechange", refresh);
+    return () => navigator.mediaDevices.removeEventListener("devicechange", refresh);
   }, []);
 
   useEffect(() => {
