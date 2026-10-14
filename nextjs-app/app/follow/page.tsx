@@ -6,7 +6,8 @@ import WebcamPlayer from "@/components/WebcamPlayer";
 import PoseOverlay from "@/components/PoseOverlay";
 import PersonSelector from "@/components/PersonSelector";
 import CoachControls from "@/components/CoachControls";
-import MaskOverlay from "@/components/MaskOverlay";
+import MaskOverlay, { MaskMode } from "@/components/MaskOverlay";
+import Resizable from "@/components/Resizable";
 import {
   uploadVideo,
   detectPersons,
@@ -39,7 +40,7 @@ export default function FollowPage() {
 
   // 教练蒙版（全画幅黑底白人），叠加在摄像头画面上对照
   const [maskUrl, setMaskUrl] = useState<string | null>(null);
-  const [maskOn, setMaskOn] = useState(false);
+  const [maskMode, setMaskMode] = useState<MaskMode | "off">("off");
 
   const coachRef = useRef<HTMLVideoElement>(null);
 
@@ -47,7 +48,7 @@ export default function FollowPage() {
     const blobUrl = URL.createObjectURL(file);
     setCoach({ blobUrl, filename: null, croppedUrl: null, isCropped: false });
     setMaskUrl(null);
-    setMaskOn(false);
+    setMaskMode("off");
     try {
       const result = await uploadVideo(file);
       setCoach((prev) => ({ ...prev, filename: result.filename }));
@@ -110,7 +111,7 @@ export default function FollowPage() {
         ? result.url
         : await watchCropProgress(result.task_id, (evt) => setCropProgress(evt.progress));
       setMaskUrl(url);
-      setMaskOn(true);
+      setMaskMode("cutout");
     } catch (e) {
       alert("生成蒙版失败：" + (e as Error).message);
     } finally {
@@ -119,8 +120,8 @@ export default function FollowPage() {
   }
 
   const coachSrc = coach.isCropped ? coach.croppedUrl : coach.blobUrl;
-  const maskOverlay = maskUrl && maskOn ? (
-    <MaskOverlay src={maskUrl} syncRef={coachRef} isMirrored={isMirrored} />
+  const maskOverlay = maskUrl && maskMode !== "off" ? (
+    <MaskOverlay src={maskUrl} syncRef={coachRef} mode={maskMode} isMirrored={isMirrored} />
   ) : undefined;
 
   return (
@@ -207,10 +208,12 @@ export default function FollowPage() {
               {maskUrl && (
                 <>
                   <button
-                    onClick={() => setMaskOn(!maskOn)}
-                    className={`px-4 py-2 rounded text-sm ${maskOn ? "bg-purple-600" : "bg-zinc-800"}`}
+                    onClick={() =>
+                      setMaskMode(maskMode === "cutout" ? "silhouette" : maskMode === "silhouette" ? "off" : "cutout")
+                    }
+                    className={`px-4 py-2 rounded text-sm ${maskMode !== "off" ? "bg-purple-600" : "bg-zinc-800"}`}
                   >
-                    蒙版叠加 {maskOn ? "ON" : "OFF"}
+                    蒙版：{{ cutout: "遮背景", silhouette: "剪影", off: "关" }[maskMode]}
                   </button>
                   <a
                     href={maskUrl}
@@ -239,9 +242,10 @@ export default function FollowPage() {
               </div>
             )}
 
-            {/* Video area：教练视频与控件条始终在同一位置，切换模式不重建（保留进度和打点） */}
-            <div className={mode === "side" ? "grid grid-cols-2 gap-4" : ""}>
-              <div>
+            {/* Video area：教练视频与控件条始终在同一位置，切换模式不重建（保留进度和打点）；
+                每个画面右下角可拖动等比缩放 */}
+            <div className={mode === "side" ? "flex flex-wrap gap-4 items-start" : ""}>
+              <Resizable defaultWidth={mode === "side" ? "calc(50% - 8px)" : "100%"}>
                 {mode === "side" && <p className="text-sm text-zinc-400 mb-2">教练</p>}
                 <div className="relative">
                   <video
@@ -258,12 +262,12 @@ export default function FollowPage() {
                   )}
                 </div>
                 <CoachControls videoRef={coachRef} bindKey={coachSrc} />
-              </div>
+              </Resizable>
               {mode === "side" && (
-                <div>
+                <Resizable defaultWidth="calc(50% - 8px)">
                   <p className="text-sm text-zinc-400 mb-2">你</p>
                   <WebcamPlayer isMirrored={isMirrored} poseEnabled={poseEnabled} overlay={maskOverlay} />
-                </div>
+                </Resizable>
               )}
             </div>
           </>
