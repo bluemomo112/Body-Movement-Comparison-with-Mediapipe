@@ -50,61 +50,6 @@ def upload():
 
 # ── 人物检测相关 ──────────────────────────────────────────────────────────────
 
-def _load_person_detector():
-    """加载 MobileNet-SSD 人物检测模型"""
-    import cv2
-    prototxt = "models/deploy.prototxt"
-    caffemodel = "models/mobilenet_ssd.caffemodel"
-    net = cv2.dnn.readNetFromCaffe(prototxt, caffemodel)
-    return net
-
-
-def _compute_iou(bbox1, bbox2):
-    """计算两个 bbox 的交并比 (IOU)"""
-    x1_1, y1_1, x2_1, y2_1 = bbox1
-    x1_2, y1_2, x2_2, y2_2 = bbox2
-
-    # 计算交集
-    x1_i = max(x1_1, x1_2)
-    y1_i = max(y1_1, y1_2)
-    x2_i = min(x2_1, x2_2)
-    y2_i = min(y2_1, y2_2)
-
-    if x2_i < x1_i or y2_i < y1_i:
-        return 0.0
-
-    inter_area = (x2_i - x1_i) * (y2_i - y1_i)
-
-    # 计算并集
-    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
-    area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
-    union_area = area1 + area2 - inter_area
-
-    if union_area == 0:
-        return 0.0
-
-    return inter_area / union_area
-
-def _detect_persons_in_frame(frame, net, conf_threshold=0.5):
-    """检测帧中的所有人物，返回 bbox 列表 [(x1,y1,x2,y2), ...]"""
-    import cv2
-    h, w = frame.shape[:2]
-    blob = cv2.dnn.blobFromImage(frame, 0.007843, (300, 300), 127.5)
-    net.setInput(blob)
-    detections = net.forward()
-
-    persons = []
-    for i in range(detections.shape[2]):
-        confidence = detections[0, 0, i, 2]
-        class_id = int(detections[0, 0, i, 1])
-        # class_id 15 = person in MobileNet-SSD VOC labels
-        if class_id == 15 and confidence > conf_threshold:
-            box = detections[0, 0, i, 3:7] * [w, h, w, h]
-            x1, y1, x2, y2 = box.astype(int)
-            persons.append((x1, y1, x2, y2))
-    return persons
-
-
 def _expand_and_clip_bbox(bbox, frame_w, frame_h, pad_ratio=0.12):
     """扩展并裁剪 bbox，避免越界和过紧"""
     x1, y1, x2, y2 = [int(v) for v in bbox]
@@ -131,17 +76,17 @@ def _expand_and_clip_bbox(bbox, frame_w, frame_h, pad_ratio=0.12):
     return (x1, y1, x2, y2)
 
 
-def _crop_output_filename(filename, bbox):
-    """生成裁剪输出文件名，避免不同人物互相覆盖缓存"""
+def _crop_output_filename(filename, role_id):
+    """生成裁剪输出文件名，避免不同角色互相覆盖缓存"""
     name, _ = os.path.splitext(filename)
-    tag = '_'.join(str(int(v)) for v in bbox)
-    return f"{name}_crop_{tag}.mp4"
+    return f"{name}_role{int(role_id)}.mp4"
 
-def _run_crop_person(task_id, input_path, output_path, target_bbox):
-    """后台线程：逐帧追踪并裁剪选中的人"""
+def _run_crop_person(task_id, input_path, output_path, role_id):
+    """后台线程：按追踪结果裁剪选中的角色"""
     import cv2
     import numpy as np
     import subprocess
+    from person_tracker import track_video, dense_boxes
 
     def update(progress, status, output=None, error=None):
         with _tasks_lock:
@@ -158,9 +103,6 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
     try:
         update(0, 'processing')
 
-        # 加载检测器
-        net = _load_person_detector()
-
         cap = cv2.VideoCapture(input_path)
         if not cap.isOpened():
             update(0, 'error', error='无法打开视频文件')
@@ -170,71 +112,27 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
         frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
         frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 0
-        target_bbox = _expand_and_clip_bbox(target_bbox, frame_w, frame_h)
+        cap.release()
+
+        # 追踪结果（detect_persons 已生成缓存时直接读取）
+        tracks = track_video(input_path, on_progress=lambda p: update(int(p * 0.45), 'processing'))
+        role = next((r for r in tracks['roles'] if r['id'] == role_id), None)
+        if role is None:
+            update(0, 'error', error=f'角色 {role_id} 不存在')
+            return
 
         # 初始化日志
         log_file = open(log_path, 'w', encoding='utf-8')
         log_file.write(f"=== 裁剪任务日志 ===\n")
         log_file.write(f"输入视频: {input_path}\n")
         log_file.write(f"视频尺寸: {frame_w}x{frame_h}, FPS: {fps}, 总帧数: {total}\n")
-        log_file.write(f"初始目标bbox: {target_bbox}\n\n")
+        log_file.write(f"角色: {role_id}, 追踪覆盖帧数: {len(role['boxes'])}/{tracks['frame_count']}\n\n")
+        print(f"[crop] _run_crop_person: role_id={role_id}, "
+              f"coverage={len(role['boxes'])}/{tracks['frame_count']}")
 
-        # 第一遍：收集所有帧的 bbox
-        bboxes = []
-        frame_idx = 0
-        tx1, ty1, tx2, ty2 = target_bbox
-        initial_bbox = target_bbox  # 保存初始bbox作为参考
-
-        detection_stats = {'detected': 0, 'fallback': 0, 'no_detection': 0}
-
-        while True:
-            ret, frame = cap.read()
-            if not ret:
-                break
-
-            persons = _detect_persons_in_frame(frame, net)
-
-            # 用 IOU 找到最匹配目标 bbox 的人
-            best_bbox = None
-            max_iou = 0.0
-            for bbox in persons:
-                iou = _compute_iou(target_bbox, bbox)
-                if iou > max_iou:
-                    max_iou = iou
-                    best_bbox = bbox
-
-            # 只有 IOU > 0.3 才认为是同一个人
-            if best_bbox and max_iou > 0.3:
-                best_bbox = _expand_and_clip_bbox(best_bbox, frame_w, frame_h)
-                bboxes.append(best_bbox)
-                target_bbox = best_bbox  # 更新目标用于下一帧
-                detection_stats['detected'] += 1
-
-                # 每100帧记录一次
-                if frame_idx % 100 == 0:
-                    log_file.write(f"帧{frame_idx}: 检测到 {len(persons)} 个人, IOU={max_iou:.3f}, bbox={best_bbox}\n")
-            else:
-                # IOU 太低或未检测到，使用上一帧的 bbox（但不再扩展）
-                fallback_bbox = bboxes[-1] if bboxes else initial_bbox
-                bboxes.append(fallback_bbox)  # 直接使用，不再调用 _expand_and_clip_bbox
-
-                if len(persons) == 0:
-                    detection_stats['no_detection'] += 1
-                else:
-                    detection_stats['fallback'] += 1
-
-                if frame_idx % 100 == 0:
-                    log_file.write(f"帧{frame_idx}: 使用fallback, 检测到{len(persons)}个人, max_iou={max_iou:.3f}\n")
-
-            frame_idx += 1
-            progress = int(frame_idx / total * 45)
-            update(progress, 'processing')
-
-        cap.release()
-
-        log_file.write(f"\n检测统计: 成功={detection_stats['detected']}, fallback={detection_stats['fallback']}, 无检测={detection_stats['no_detection']}\n")
-
-        # 平滑 bbox
+        # 缺失帧插值，扩边后平滑
+        bboxes = [_expand_and_clip_bbox(b, frame_w, frame_h)
+                  for b in dense_boxes(role, tracks['frame_count'])]
         bboxes = _smooth_bbox(bboxes)
 
         # 计算统一的裁剪尺寸（使用95百分位数，避免异常大的bbox影响）
@@ -261,7 +159,7 @@ def _run_crop_person(task_id, input_path, output_path, target_bbox):
             if not ret:
                 break
 
-            x1, y1, x2, y2 = bboxes[frame_idx]
+            x1, y1, x2, y2 = bboxes[min(frame_idx, len(bboxes) - 1)]
             cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
 
             # 以人物中心为基准，裁剪固定大小区域
@@ -330,12 +228,68 @@ def _smooth_bbox(bboxes, window_size=5):
     return smoothed
 
 
-@app.route('/detect_persons', methods=['POST'])
-def detect_persons():
-    """检测视频多帧中的所有人物（避免首帧漏检）"""
+_track_jobs = {}  # input_path -> task_id，避免同一视频重复追踪
+
+
+def _run_track(task_id, input_path):
+    """后台线程：追踪整段视频并写缓存"""
+    from person_tracker import track_video
+
+    def update(progress, status, output=None, error=None):
+        with _tasks_lock:
+            _tasks[task_id] = {'progress': progress, 'status': status,
+                               'output': output, 'error': error}
+
+    try:
+        track_video(input_path, on_progress=lambda p: update(p, 'processing'))
+        update(100, 'done', output='tracked')
+    except Exception as e:
+        print(f"[detect] _run_track: error={e}")
+        update(0, 'error', error=str(e))
+    finally:
+        with _tasks_lock:
+            _track_jobs.pop(input_path, None)
+
+
+def _persons_from_tracks(input_path, tracks):
+    """为每个角色生成缩略图：取同时出现角色最多的第一帧"""
     import cv2
     import base64
+    from person_tracker import dense_boxes
 
+    present = {}
+    for r in tracks['roles']:
+        for b in r['boxes']:
+            present[b[0]] = present.get(b[0], 0) + 1
+    thumb_frame = max(sorted(present), key=lambda f: present[f]) if present else 0
+
+    cap = cv2.VideoCapture(input_path)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, thumb_frame)
+    ret, frame = cap.read()
+    cap.release()
+    if not ret:
+        return []
+
+    persons = []
+    for r in tracks['roles']:
+        box = dense_boxes(r, tracks['frame_count'])[thumb_frame]
+        x1, y1, x2, y2 = _expand_and_clip_bbox(box, frame.shape[1], frame.shape[0])
+        _, buffer = cv2.imencode('.jpg', frame[y1:y2, x1:x2])
+        persons.append({
+            'id': r['id'],
+            'bbox': [x1, y1, x2, y2],
+            'thumbnail': 'data:image/jpeg;base64,' + base64.b64encode(buffer).decode('utf-8'),
+        })
+    print(f"[detect] _persons_from_tracks: thumb_frame={thumb_frame}, persons={len(persons)}")
+    return persons
+
+
+@app.route('/detect_persons', methods=['POST'])
+def detect_persons():
+    """
+    追踪视频中所有角色。未缓存时返回 {task_id}，前端等任务完成后再请求一次；
+    已缓存时返回 {persons, tracks}
+    """
     data = request.get_json(force=True)
     filename = data.get('filename', '')
 
@@ -346,118 +300,44 @@ def detect_persons():
     if not os.path.exists(input_path):
         return jsonify({'error': 'File not found'}), 404
 
-    cap = cv2.VideoCapture(input_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30
-    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    if not os.path.exists(input_path + '.tracks.json'):
+        with _tasks_lock:
+            task_id = _track_jobs.get(input_path)
+            if task_id is None:
+                task_id = str(uuid.uuid4())
+                _track_jobs[input_path] = task_id
+                _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
+                threading.Thread(target=_run_track, args=(task_id, input_path), daemon=True).start()
+        print(f"[detect] detect_persons: filename={filename}, tracking task_id={task_id}")
+        return jsonify({'task_id': task_id})
 
-    # 采样策略：前10秒，每15帧采样一次（约0.5秒间隔）
-    max_sample_frames = min(int(fps * 10), total_frames)
-    sample_interval = 15
-
-    net = _load_person_detector()
-    all_persons = []  # 收集所有检测到的 bbox
-
-    frame_idx = 0
-    while frame_idx < max_sample_frames:
-        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        persons = _detect_persons_in_frame(frame, net)
-        all_persons.extend(persons)
-        frame_idx += sample_interval
-
-    cap.release()
-
-    if not all_persons:
+    from person_tracker import track_video
+    tracks = track_video(input_path)
+    if not tracks['roles']:
         return jsonify({'error': 'No person detected'}), 404
 
-    # 去重：合并IoU > 0.3 的 bbox（降低阈值以更好地合并同一人物）
-    def iou(box1, box2):
-        x1 = max(box1[0], box2[0])
-        y1 = max(box1[1], box2[1])
-        x2 = min(box1[2], box2[2])
-        y2 = min(box1[3], box2[3])
-        inter = max(0, x2 - x1) * max(0, y2 - y1)
-        area1 = (box1[2] - box1[0]) * (box1[3] - box1[1])
-        area2 = (box2[2] - box2[0]) * (box2[3] - box2[1])
-        return inter / (area1 + area2 - inter + 1e-6)
+    persons = _persons_from_tracks(input_path, tracks)
+    return jsonify({'persons': persons, 'tracks': tracks})
 
-    unique_persons = []
-    for bbox in all_persons:
-        merged = False
-        for i, existing in enumerate(unique_persons):
-            if iou(bbox, existing) > 0.3:
-                # 合并：取平均
-                unique_persons[i] = [
-                    (bbox[0] + existing[0]) / 2,
-                    (bbox[1] + existing[1]) / 2,
-                    (bbox[2] + existing[2]) / 2,
-                    (bbox[3] + existing[3]) / 2
-                ]
-                merged = True
-                break
-        if not merged:
-            unique_persons.append(bbox)
-
-    # 读取首帧生成缩略图
-    cap = cv2.VideoCapture(input_path)
-    ret, first_frame = cap.read()
-    cap.release()
-
-    if not ret:
-        return jsonify({'error': 'Cannot read video for thumbnails'}), 400
-
-    results = []
-    for idx, (x1, y1, x2, y2) in enumerate(unique_persons):
-        x1, y1, x2, y2 = _expand_and_clip_bbox((int(x1), int(y1), int(x2), int(y2)),
-                                                first_frame.shape[1], first_frame.shape[0])
-        crop = first_frame[y1:y2, x1:x2]
-        if crop.size == 0:
-            continue
-        _, buffer = cv2.imencode('.jpg', crop)
-        thumb_b64 = base64.b64encode(buffer).decode('utf-8')
-        results.append({
-            'id': idx,
-            'bbox': [int(x1), int(y1), int(x2), int(y2)],
-            'thumbnail': f'data:image/jpeg;base64,{thumb_b64}'
-        })
-
-    if not results:
-        return jsonify({'error': 'No valid person crop'}), 404
-
-    return jsonify({'persons': results})
 
 @app.route('/crop_person', methods=['POST'])
 def crop_person():
-    """裁剪视频中选中的人物"""
-    import cv2
-
+    """裁剪视频中选中的角色"""
     data = request.get_json(force=True)
     filename = data.get('filename', '')
-    bbox = data.get('bbox', [])  # [x1, y1, x2, y2]
+    role_id = data.get('role_id')
 
     if not filename or not allowed_file(filename):
         return jsonify({'error': 'Invalid filename'}), 400
-    if len(bbox) != 4:
-        return jsonify({'error': 'Invalid bbox'}), 400
+    if not isinstance(role_id, int):
+        return jsonify({'error': 'Invalid role_id'}), 400
 
     input_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     if not os.path.exists(input_path):
         return jsonify({'error': 'File not found'}), 404
 
-    cap = cv2.VideoCapture(input_path)
-    frame_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)) or 0
-    frame_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) or 0
-    cap.release()
-    if frame_w <= 0 or frame_h <= 0:
-        return jsonify({'error': 'Cannot read video size'}), 400
-
-    clipped_bbox = _expand_and_clip_bbox(tuple(bbox), frame_w, frame_h)
-
     # 生成输出文件名
-    out_name = _crop_output_filename(filename, clipped_bbox)
+    out_name = _crop_output_filename(filename, role_id)
     output_path = os.path.join(app.config['UPLOAD_FOLDER'], out_name)
 
     # 缓存检查
@@ -469,9 +349,10 @@ def crop_person():
     with _tasks_lock:
         _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
 
+    print(f"[crop] crop_person: filename={filename}, role_id={role_id}, task_id={task_id}")
     t = threading.Thread(
         target=_run_crop_person,
-        args=(task_id, input_path, output_path, clipped_bbox),
+        args=(task_id, input_path, output_path, role_id),
         daemon=True,
     )
     t.start()

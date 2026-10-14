@@ -12,3 +12,5 @@ dance_videos/
 
 
 .venv/
+# YOLO 权重（首次运行自动下载）
+models/*.pt

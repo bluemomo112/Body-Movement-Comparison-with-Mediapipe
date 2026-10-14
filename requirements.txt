@@ -3,3 +3,4 @@ streamlit
 scipy
 fastdtw
 mediapipe
+ultralytics
