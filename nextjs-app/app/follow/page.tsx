@@ -14,6 +14,7 @@ import {
   detectPersons,
   cropPerson,
   maskPerson,
+  cancelTask,
   watchCropProgress,
   DetectPersonsResult,
 } from "@/lib/api";
@@ -45,6 +46,7 @@ export default function FollowPage() {
   const [maskStrength, setMaskStrength] = useState(0.8);
 
   const coachRef = useRef<HTMLVideoElement>(null);
+  const [maskTaskId, setMaskTaskId] = useState<string | null>(null);
   const [coachAspect, setCoachAspect] = useState(16 / 9); // 舞台比例 = 教练视频比例
 
   const handleCoachSelect = useCallback(async (file: File) => {
@@ -110,14 +112,16 @@ export default function FollowPage() {
     setCropProgress(0);
     try {
       const result = await maskPerson(coach.filename, roleId);
+      setMaskTaskId(result.task_id);
       const url = result.cached && result.url
         ? result.url
         : await watchCropProgress(result.task_id, (evt) => setCropProgress(evt.progress));
       setMaskUrl(url);
       setMaskMode("cutout");
     } catch (e) {
-      alert("生成蒙版失败：" + (e as Error).message);
+      if ((e as Error).message !== "已取消") alert("生成蒙版失败：" + (e as Error).message);
     } finally {
+      setMaskTaskId(null);
       setCropLoading(false);
     }
   }
@@ -249,7 +253,17 @@ export default function FollowPage() {
               <div className="bg-zinc-900 p-4 rounded-lg">
                 <div className="flex justify-between mb-2">
                   <span className="text-sm">{taskLabel}</span>
-                  <span className="text-sm">{cropProgress}%</span>
+                  <span className="text-sm">
+                    {cropProgress}%
+                    {maskTaskId && (
+                      <button
+                        className="ml-3 text-red-400 hover:text-red-300"
+                        onClick={() => cancelTask(maskTaskId)}
+                      >
+                        取消
+                      </button>
+                    )}
+                  </span>
                 </div>
                 <div className="h-2 bg-zinc-800 rounded">
                   <div

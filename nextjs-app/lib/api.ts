@@ -106,6 +106,10 @@ export async function maskPerson(
   return res.json();
 }
 
+export async function cancelTask(taskId: string): Promise<void> {
+  await fetch(`${BASE}/cancel/${taskId}`, { method: "POST" });
+}
+
 /**
  * Opens an SSE connection to monitor crop progress.
  * Calls onProgress for each event, resolves with the final video URL.

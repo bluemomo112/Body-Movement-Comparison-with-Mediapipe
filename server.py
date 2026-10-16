@@ -20,6 +20,12 @@ ALLOWED_EXTENSIONS = {'mp4', 'mov', 'avi', 'mkv', 'webm'}
 # 任务状态存储 {task_id: {progress, status, output, error}}
 _tasks = {}
 _tasks_lock = threading.Lock()
+_cancelled = set()  # 已请求取消的 task_id，由进度回调检查并中断
+_mask_jobs = {}  # output_path -> task_id，避免同一蒙版重复生成
+
+
+class TaskCancelled(Exception):
+    pass
 
 
 def allowed_file(filename):
@@ -367,6 +373,8 @@ def _run_mask(task_id, input_path, output_path, role_id):
 
     def update(progress, status, output=None, error=None):
         with _tasks_lock:
+            if status == 'processing' and task_id in _cancelled:
+                raise TaskCancelled()
             _tasks[task_id] = {'progress': progress, 'status': status,
                                'output': output, 'error': error}
 
@@ -387,10 +395,17 @@ def _run_mask(task_id, input_path, output_path, role_id):
         rel = '/' + output_path.replace(os.sep, '/')
         print(f"[mask] _run_mask: done output={rel}")
         update(100, 'done', output=rel)
+    except TaskCancelled:
+        print(f"[mask] _run_mask: cancelled task_id={task_id}")
+        with _tasks_lock:
+            _tasks[task_id] = {'progress': 0, 'status': 'error', 'output': None, 'error': '已取消'}
     except Exception as e:
         print(f"[mask] _run_mask: error={e}")
         update(0, 'error', error=str(e))
     finally:
+        with _tasks_lock:
+            _mask_jobs.pop(output_path, None)
+            _cancelled.discard(task_id)
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
 
@@ -418,13 +433,28 @@ def mask_person():
     if os.path.exists(output_path):
         return jsonify({'task_id': None, 'cached': True, 'url': '/' + output_path.replace(os.sep, '/')})
 
-    task_id = str(uuid.uuid4())
     with _tasks_lock:
+        if output_path in _mask_jobs:
+            return jsonify({'task_id': _mask_jobs[output_path], 'cached': False})
+        task_id = str(uuid.uuid4())
+        _mask_jobs[output_path] = task_id
         _tasks[task_id] = {'progress': 0, 'status': 'processing', 'output': None, 'error': None}
     print(f"[mask] mask_person: filename={filename}, role_id={role_id}, task_id={task_id}")
     threading.Thread(target=_run_mask, args=(task_id, input_path, output_path, role_id),
                      daemon=True).start()
     return jsonify({'task_id': task_id, 'cached': False})
+
+
+@app.route('/cancel/<task_id>', methods=['POST'])
+def cancel_task(task_id):
+    """请求取消蒙版任务，线程在下一次进度回调时中断"""
+    with _tasks_lock:
+        state = _tasks.get(task_id)
+        if state is None or state['status'] != 'processing':
+            return jsonify({'cancelled': False})
+        _cancelled.add(task_id)
+    print(f"[mask] cancel_task: task_id={task_id}")
+    return jsonify({'cancelled': True})
 
 
 @app.route('/crop_person/progress/<task_id>')
